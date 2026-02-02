@@ -1,6 +1,7 @@
 import pandas as pd
 import hashlib
 import os
+import time
 from datetime import datetime, timedelta
 import pytz
 import streamlit as st
@@ -57,35 +58,44 @@ def get_worksheet(tab_name):
         return None
 
 def read_sheet_to_df(tab_name):
-    """특정 탭의 데이터를 읽어서 DataFrame으로 변환 (헤더 공백 제거 및 에러 방지)"""
-    ws = get_worksheet(tab_name)
-    if ws:
+    """특정 탭의 데이터를 읽어서 DataFrame으로 변환 (429 에러 시 재시도 기능 추가)"""
+    
+    # 최대 3번까지 재시도
+    for attempt in range(3):
         try:
+            ws = get_worksheet(tab_name)
+            if not ws: return pd.DataFrame()
+
             data = ws.get_all_values()
             
             # 데이터가 없거나 헤더만 있는 경우 처리
             if not data or len(data) < 2:
                 if data: 
-                    # 헤더는 있는데 데이터가 없는 경우 (공백 제거 후 빈 DF 반환)
                     cleaned_cols = [str(c).strip() for c in data[0]]
                     return pd.DataFrame(columns=cleaned_cols)
                 return pd.DataFrame()
             
-            # 첫 줄(헤더) 처리: 앞뒤 공백 제거 (가장 중요!)
+            # 첫 줄(헤더) 처리
             raw_headers = data[0]
             headers = [str(h).strip() for h in raw_headers]
             
-            # 만약 헤더가 비어있으면(데이터만 있고 제목이 없으면) 강제로 이름 붙이기
+            # 헤더 비상 대책 (users 탭인 경우)
             if 'username' not in headers and tab_name == 'users':
-                # 헤더가 날아갔다고 판단하고 임시 헤더 부여 (비상 대책)
                 if len(headers) >= 4:
                     headers = ['username', 'password', 'name', 'level'] + headers[4:]
             
             rows = data[1:]
             df = pd.DataFrame(rows, columns=headers)
             return df
+            
         except Exception as e:
-            print(f"Sheet Load Error ({tab_name}): {e}")
+            # 429 에러(속도 제한)가 뜨면 잠시 쉬었다가 재시도
+            if "429" in str(e):
+                time.sleep(2)  # 2초 휴식
+                continue       # 다시 시도해라!
+            
+            # 다른 에러면 그냥 에러 띄우고 종료
+            st.error(f"구글 시트 읽기 에러 ({tab_name}): {e}")
             return pd.DataFrame()
             
     return pd.DataFrame()
