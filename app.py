@@ -410,11 +410,12 @@ def show_level_test_page():
     """, unsafe_allow_html=True)
 
     user_info = utils.get_user_info(st.session_state.username)
-    has_existing_level = user_info and pd.notna(user_info['level']) and str(user_info['level']) != '' and int(user_info['level']) > 0
+    # 이미 레벨이 있는 경우(1 이상)
+    has_existing_level = user_info and user_info['level'] is not None and user_info['level'] > 0
 
     with st.sidebar:
-        st.title("🎯 테스트 중")
-        st.caption("집중해서 풀어보세요!")
+        st.title("🎯 레벨 테스트")
+        st.caption("1~9단계 문제를 풀어보세요!")
         st.divider()
         
         if has_existing_level:
@@ -428,26 +429,35 @@ def show_level_test_page():
         else:
             st.info("신규 가입자는 레벨 테스트를 완료해야 학습을 시작할 수 있습니다.")
 
-    st.markdown("<h1 style='text-align: center;'>🎯 레벨 테스트</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center;'>🎯 레벨 테스트 (Lv.1 ~ Lv.9)</h1>", unsafe_allow_html=True)
     
     df = utils.load_data()
     if df is None: 
         st.error("데이터를 불러올 수 없습니다.")
         return
 
+    # --- 문제 출제 로직 (1~9레벨) ---
     if 'test_questions' not in st.session_state or 'level_test_state' not in st.session_state:
-        # 레벨별 샘플링 (데이터가 부족할 수 있으므로 min 처리)
-        q1 = df[df['level'] == 1].sample(n=min(3, len(df[df['level']==1]))).to_dict('records')
-        q2 = df[df['level'] == 2].sample(n=min(4, len(df[df['level']==2]))).to_dict('records')
-        q3 = df[df['level'] == 3].sample(n=min(3, len(df[df['level']==3]))).to_dict('records')
+        test_set = []
         
-        # 만약 레벨 1,2,3 데이터가 너무 적으면 전체에서 랜덤 추출
-        if len(q1) + len(q2) + len(q3) < 5:
-            test_set = df.sample(n=min(10, len(df))).to_dict('records')
-        else:
-            test_set = q1 + q2 + q3
+        # 1레벨부터 9레벨까지 돌면서 1문제씩 뽑기
+        for i in range(1, 10):
+            level_data = df[df['level'] == i]
+            if not level_data.empty:
+                # 각 레벨에서 1문제 추출
+                picked = level_data.sample(n=1).to_dict('records')
+                test_set.extend(picked)
+        
+        # 만약 데이터가 너무 없어서(예: DB에 1레벨밖에 없음) 문제가 3개 미만이면 -> 전체에서 랜덤 보충
+        if len(test_set) < 3:
+            needed = 5 - len(test_set)
+            remaining_df = df[~df['id'].isin([q['id'] for q in test_set])] # 이미 뽑은거 제외
+            if not remaining_df.empty:
+                extra = remaining_df.sample(n=min(len(remaining_df), needed)).to_dict('records')
+                test_set.extend(extra)
             
-        random.shuffle(test_set)
+        # 문제 섞기 (난이도 순으로 풀고 싶으면 아래 shuffle을 지우세요)
+        # random.shuffle(test_set) 
         
         st.session_state.test_questions = test_set
         st.session_state.test_idx = 0
@@ -457,43 +467,54 @@ def show_level_test_page():
         if 'last_test_feedback' in st.session_state: del st.session_state['last_test_feedback']
 
     questions = st.session_state.test_questions
+    
+    # 문제가 하나도 안 뽑혔을 때 (DB 텅 빔)
+    if not questions:
+        st.warning("⚠️ 레벨 테스트를 위한 단어 데이터가 부족합니다. (voca_db를 채워주세요)")
+        return
+
     idx = st.session_state.test_idx
 
-    # 테스트 종료 처리
+    # --- 테스트 종료 및 결과 처리 ---
     if idx >= len(questions):
         score = st.session_state.test_score
-        # 점수에 따른 레벨 배정 로직 (간단 버전)
-        new_level = 1
         total_q = len(questions)
-        if total_q > 0:
-            ratio = score / total_q
-            if ratio >= 0.8: new_level = 3
-            elif ratio >= 0.5: new_level = 2
         
+        # [점수 계산 로직]
+        # 예: 9문제 중 1개 맞추면 Lv.1, 9개 다 맞추면 Lv.9
+        # (문항 수가 적을 땐 맞춘 개수 = 레벨로 잡는 게 심플합니다)
+        if total_q >= 9:
+            new_level = max(1, score) # 최소 1레벨
+        else:
+            # 문제가 적을 땐 비율로 계산
+            ratio = score / total_q
+            new_level = max(1, int(ratio * 9))
+            if new_level == 0: new_level = 1
+
         user_info = utils.get_user_info(st.session_state.username)
-        current_level = user_info['level'] if user_info and pd.notna(user_info['level']) else "없음"
+        current_level = user_info['level'] if user_info and user_info['level'] else "없음"
         
         _, col, _ = st.columns([1, 2, 1])
         with col:
             with st.container(border=True):
                 st.markdown(f"<h2 style='text-align: center;'>🎉 테스트 완료!</h2>", unsafe_allow_html=True)
-                st.metric("총점", f"{score} / {len(questions)}")
+                st.metric("총점", f"{score} / {total_q}")
                 
                 if 'last_test_feedback' in st.session_state and st.session_state.last_test_feedback:
                     fb = st.session_state.last_test_feedback
                     if fb['is_correct']: st.success(f"마지막 문제 정답! ({fb['word']})")
                     else: st.error(f"마지막 문제 오답! 정답은 {fb['word']} 입니다.")
 
-                st.info(f"📋 **진단 결과:** \n기존 레벨: **{current_level}** \n추천 레벨: **Level {new_level}**")
+                st.info(f"📋 **진단 결과:** \n추천 레벨: **Level {new_level}**")
                 
                 st.write("---")
                 st.write("**이 결과를 적용하시겠습니까?**")
                 
                 col_y, col_n = st.columns(2)
                 with col_y:
-                    if st.button("✅ 예 (변경함)", type="primary", use_container_width=True):
+                    if st.button("✅ 시작하기", type="primary", use_container_width=True):
                         utils.update_user_level(st.session_state.username, new_level)
-                        st.success(f"레벨이 {new_level}로 변경되었습니다!")
+                        st.success(f"레벨 {new_level}로 시작합니다!")
                         time.sleep(1)
                         st.session_state.is_level_testing = False
                         st.session_state.page = 'dashboard'
@@ -504,11 +525,7 @@ def show_level_test_page():
                         st.rerun()
                         
                 with col_n:
-                    if st.button("❌ 아니오 (유지함)", use_container_width=True):
-                        st.info("기존 레벨을 유지합니다.")
-                        time.sleep(1)
-                        st.session_state.is_level_testing = False
-                        st.session_state.page = 'dashboard'
+                    if st.button("🔄 재시험", use_container_width=True):
                         keys_to_delete = ['test_questions', 'test_idx', 'test_score', 'test_results', 'last_test_feedback', 'level_test_state']
                         for k in keys_to_delete:
                             if k in st.session_state: del st.session_state[k]
@@ -519,25 +536,41 @@ def show_level_test_page():
                 results_data = []
                 for i, res in enumerate(st.session_state.test_results):
                     icon = "✅" if res['is_correct'] else "❌"
-                    results_data.append({"번호": i + 1, "결과": icon, "문제": res['word'], "정답": res['correct_answer'], "내 답": res['user_answer']})
+                    # 레벨 정보가 있으면 표시
+                    q_word = res['word']
+                    found_row = df[df['target_word'] == q_word]
+                    lv_tag = ""
+                    if not found_row.empty:
+                        lv = found_row.iloc[0]['level']
+                        lv_tag = f"(Lv.{lv})"
+                        
+                    results_data.append({
+                        "번호": i + 1, 
+                        "결과": icon, 
+                        "문제": f"{q_word} {lv_tag}", 
+                        "정답": res['correct_answer'], 
+                        "내 답": res['user_answer']
+                    })
                 st.dataframe(pd.DataFrame(results_data), hide_index=True, use_container_width=True)
         return
 
+    # --- 문제 표시 UI ---
     q = questions[idx]
     
     _, col, _ = st.columns([1, 2, 1])
     with col:
+        # 진행 바
+        st.progress((idx) / len(questions))
+        st.caption(f"문제 {idx + 1} / {len(questions)} (Lv.{q['level']})")
+        
+        # 피드백 표시
         if 'last_test_feedback' in st.session_state and st.session_state.last_test_feedback:
             fb = st.session_state.last_test_feedback
-            label = "방금 문제" if st.session_state.get("level_test_state") == "feedback" else "이전 문제"
             if fb['is_correct']:
-                st.success(f"✅ {label} 정답! ({fb['word']})")
+                st.success(f"✅ 정답! ({fb['word']})")
             else:
-                st.error(f"❌ {label} 오답! 정답은 **{fb['word']}** 입니다.")
+                st.error(f"❌ 오답! 정답은 **{fb['word']}** 입니다.")
 
-        st.progress((idx + 1) / len(questions))
-        st.write(f"**문제 {idx + 1} / {len(questions)}**")
-        
         with st.container(border=True):
             st.subheader(f"💡 뜻: {q['meaning']}")
             st.write(f"📖 해석: {q['sentence_ko']}")
