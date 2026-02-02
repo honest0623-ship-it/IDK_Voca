@@ -57,28 +57,34 @@ def get_worksheet(tab_name):
         return None
 
 def read_sheet_to_df(tab_name):
-    """특정 탭의 데이터를 읽어서 DataFrame으로 변환 (에러 방지 버전)"""
+    """특정 탭의 데이터를 읽어서 DataFrame으로 변환 (헤더 공백 제거 및 에러 방지)"""
     ws = get_worksheet(tab_name)
     if ws:
-        # get_all_records() 대신 get_all_values()를 사용하여 
-        # 헤더가 비어있거나 중복되어도 에러가 나지 않도록 수정
         try:
             data = ws.get_all_values()
             
-            # 데이터가 아예 없으면 빈 표 반환
+            # 데이터가 없거나 헤더만 있는 경우 처리
             if not data or len(data) < 2:
-                # 헤더만 있거나 비어있는 경우
-                if data: return pd.DataFrame(columns=data[0])
+                if data: 
+                    # 헤더는 있는데 데이터가 없는 경우 (공백 제거 후 빈 DF 반환)
+                    cleaned_cols = [str(c).strip() for c in data[0]]
+                    return pd.DataFrame(columns=cleaned_cols)
                 return pd.DataFrame()
             
-            # 첫 줄은 헤더(제목), 두 번째 줄부터 데이터
-            headers = data[0]
-            rows = data[1:]
+            # 첫 줄(헤더) 처리: 앞뒤 공백 제거 (가장 중요!)
+            raw_headers = data[0]
+            headers = [str(h).strip() for h in raw_headers]
             
+            # 만약 헤더가 비어있으면(데이터만 있고 제목이 없으면) 강제로 이름 붙이기
+            if 'username' not in headers and tab_name == 'users':
+                # 헤더가 날아갔다고 판단하고 임시 헤더 부여 (비상 대책)
+                if len(headers) >= 4:
+                    headers = ['username', 'password', 'name', 'level'] + headers[4:]
+            
+            rows = data[1:]
             df = pd.DataFrame(rows, columns=headers)
             return df
         except Exception as e:
-            # 그래도 에러가 나면 로그만 남기고 빈 DF 반환
             print(f"Sheet Load Error ({tab_name}): {e}")
             return pd.DataFrame()
             
