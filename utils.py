@@ -57,12 +57,31 @@ def get_worksheet(tab_name):
         return None
 
 def read_sheet_to_df(tab_name):
-    """특정 탭의 데이터를 읽어서 DataFrame으로 변환"""
+    """특정 탭의 데이터를 읽어서 DataFrame으로 변환 (에러 방지 버전)"""
     ws = get_worksheet(tab_name)
     if ws:
-        data = ws.get_all_records()
-        df = pd.DataFrame(data)
-        return df
+        # get_all_records() 대신 get_all_values()를 사용하여 
+        # 헤더가 비어있거나 중복되어도 에러가 나지 않도록 수정
+        try:
+            data = ws.get_all_values()
+            
+            # 데이터가 아예 없으면 빈 표 반환
+            if not data or len(data) < 2:
+                # 헤더만 있거나 비어있는 경우
+                if data: return pd.DataFrame(columns=data[0])
+                return pd.DataFrame()
+            
+            # 첫 줄은 헤더(제목), 두 번째 줄부터 데이터
+            headers = data[0]
+            rows = data[1:]
+            
+            df = pd.DataFrame(rows, columns=headers)
+            return df
+        except Exception as e:
+            # 그래도 에러가 나면 로그만 남기고 빈 DF 반환
+            print(f"Sheet Load Error ({tab_name}): {e}")
+            return pd.DataFrame()
+            
     return pd.DataFrame()
 
 # --- 4. 보안 및 시간 함수 ---
