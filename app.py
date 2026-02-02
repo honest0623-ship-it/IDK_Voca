@@ -2,13 +2,97 @@ import streamlit as st
 import pandas as pd
 import os
 import random
-from datetime import timedelta
+from datetime import datetime, timedelta
 import altair as alt 
 import utils 
 import streamlit.components.v1 as components
 import time
 
 # --- 화면 렌더링 함수 ---
+
+def _loading_overlay(message: str):
+    """화면 전체 클릭을 막는 로딩 오버레이"""
+    components.html(f'''
+    <style>
+      .oai-loading-overlay {{
+        position: fixed; inset: 0; z-index: 999999;
+        background: rgba(255,255,255,0.72);
+        backdrop-filter: blur(2px);
+        display: flex; align-items: center; justify-content: center;
+        pointer-events: all;
+      }}
+      .oai-loading-box {{
+        background: white; padding: 18px 20px; border-radius: 14px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.12);
+        font-size: 16px; font-weight: 600;
+      }}
+      .oai-loading-sub {{
+        margin-top: 8px; font-size: 13px; font-weight: 400; color: #666;
+      }}
+    </style>
+    <div class='oai-loading-overlay'>
+      <div class='oai-loading-box'>
+        {message}
+        <div class='oai-loading-sub'>중복 클릭을 방지하기 위해 잠시 입력을 잠가두었습니다.</div>
+      </div>
+    </div>
+    ''', height=0)
+
+def _get_cached_user_info(username: str, force: bool = False):
+    """불필요한 users 시트 재조회 방지"""
+    if force or st.session_state.get('user_info_username') != username or 'user_info' not in st.session_state or st.session_state.get('user_info_stale', False):
+        with st.spinner('로딩중… 유저 정보를 불러오는 중입니다.'):
+            st.session_state.user_info = utils.get_user_info(username)
+        st.session_state.user_info_username = username
+        st.session_state.user_info_stale = False
+    return st.session_state.get('user_info')
+
+def _request_action(name: str, payload=None, message: str = '로딩중 잠시만 기다려주세요…'):
+    """무거운 작업을 2단계로 실행해 오버레이를 먼저 띄움"""
+    st.session_state._pending_action = {'name': name, 'payload': payload or {}, 'stage': 'prepare', 'message': message}
+    st.session_state._busy_ui = True
+    st.rerun()
+
+def _handle_pending_action():
+    act = st.session_state.get('_pending_action')
+    if not act:
+        return False
+    # 오버레이 먼저 표시
+    _loading_overlay(act.get('message', '로딩중 잠시만 기다려주세요…'))
+    if act.get('stage') == 'prepare':
+        # 다음 rerun에서 실제 실행
+        st.session_state._pending_action['stage'] = 'run'
+        st.rerun()
+        return True
+    # stage == run
+    name = act.get('name')
+    payload = act.get('payload', {})
+    try:
+        if name == 'sync_now':
+            username = payload.get('username')
+            if username:
+                with st.spinner('저장중… 잠시만 기다려주세요.'):
+                    flush_pending_data(username)
+            if hasattr(st, 'toast'):
+                st.toast('저장 완료')
+            else:
+                st.success('저장 완료')
+        elif name == 'go_home':
+            username = payload.get('username')
+            if username:
+                with st.spinner('저장중… 잠시만 기다려주세요.'):
+                    flush_pending_data(username)
+            st.session_state.page = 'dashboard'
+        elif name == 'refresh_user_info':
+            username = payload.get('username')
+            if username:
+                _get_cached_user_info(username, force=True)
+    finally:
+        st.session_state._pending_action = None
+        st.session_state._busy_ui = False
+        st.rerun()
+    return True
+
 def main():
     st.set_page_config(
         page_title="일등급 단어 마스터", 
@@ -40,6 +124,11 @@ def main():
     if 'page' not in st.session_state:
         st.session_state.page = 'login'
 
+
+    # ✅ 무거운 작업은 오버레이로 클릭 잠금 후 실행
+    if _handle_pending_action():
+        return
+
     # 라우팅
     if st.session_state.page == 'admin':
         show_admin_page()
@@ -48,7 +137,7 @@ def main():
     else:
         # 로그인 상태라면 최신 유저 정보 가져오기 (레벨 등 동기화)
         if 'username' in st.session_state:
-            user_info = utils.get_user_info(st.session_state.username)
+            user_info = _get_cached_user_info(st.session_state.username)
             # 유저 정보가 없거나(삭제됨) 레벨이 비어있으면 레벨테스트로
             if user_info and (user_info['level'] is None or pd.isna(user_info['level']) or str(user_info['level']) == ''):
                  st.session_state.is_level_testing = True
@@ -65,27 +154,57 @@ def check_answer_callback(username, curr_q, target, today):
     input_key = f"quiz_in_{st.session_state.current_idx}_{st.session_state.retry_mode}"
     user_input = st.session_state.get(input_key, "").strip()
 
-    if user_input:
-        is_correct = user_input.lower() == target.lower()
-        
-        if st.session_state.is_first_attempt:
-             utils.log_study_result(username, curr_q['id'], curr_q['level'], is_correct)
+    if not user_input:
+        return
 
-        if is_correct:
-            progress_df = utils.load_user_progress(username) 
-            if st.session_state.is_first_attempt and st.session_state.get("quiz_mode") == "normal":
-                progress_df = utils.update_schedule(curr_q['id'], True, progress_df, today)
-                utils.save_progress(username, progress_df)
-            st.session_state.quiz_state = "success"
+    is_correct = user_input.lower() == target.lower()
+
+    # ✅ 1) 학습 로그는 즉시 시트에 쓰지 말고, 메모리에 누적(배치 저장)
+    # (오답노트 재학습에서는 로그를 남기지 않음)
+    if st.session_state.is_first_attempt and st.session_state.get("quiz_mode") == "normal":
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        row = [timestamp, str(today), int(curr_q['id']), username, int(curr_q['level']), 1 if is_correct else 0]
+        st.session_state.setdefault("pending_logs", [])
+        st.session_state.pending_logs.append(row)
+
+    # ✅ 2) progress도 시트 재조회/즉시 저장하지 말고, 세션 메모리에서만 업데이트
+    if "progress_df" not in st.session_state or st.session_state.get("progress_username") != username:
+        with st.spinner('로딩중… 학습 진도를 불러오는 중입니다.'):
+            st.session_state.progress_df = utils.load_user_progress(username)
+        st.session_state.progress_username = username
+        st.session_state.progress_dirty = False
+
+    mode = st.session_state.get("quiz_mode", "normal")
+
+    # ✅ 오답노트(wrong_review)에서는 '즉시 재입력'을 강제하지 않고,
+    #    틀린 문제는 큐(quiz_list) 뒤로 보내서 나중에 다시 나오게 합니다.
+    if mode == "wrong_review":
+        if not is_correct:
+            # 현재 문제를 뒤로 보내기(재출제)
+            st.session_state.quiz_list.append(curr_q)
+            st.session_state.quiz_state = "review_fail"
         else:
-            if st.session_state.is_first_attempt:
-                progress_df = utils.load_user_progress(username)
-                if st.session_state.get("quiz_mode") == "normal":
-                    progress_df = utils.update_schedule(curr_q['id'], False, progress_df, today)
-                    utils.save_progress(username, progress_df)
-                st.session_state.wrong_answers.append(curr_q)
-                st.session_state.is_first_attempt = False
-            st.session_state.retry_mode = True
+            st.session_state.quiz_state = "success"
+
+        st.session_state.retry_mode = False
+        st.session_state.is_first_attempt = True
+        return
+
+
+    if is_correct:
+        if st.session_state.is_first_attempt and st.session_state.get("quiz_mode") == "normal":
+            st.session_state.progress_df = utils.update_schedule(curr_q['id'], True, st.session_state.progress_df, today)
+            st.session_state.progress_dirty = True
+        st.session_state.quiz_state = "success"
+    else:
+        if st.session_state.is_first_attempt:
+            if st.session_state.get("quiz_mode") == "normal":
+                st.session_state.progress_df = utils.update_schedule(curr_q['id'], False, st.session_state.progress_df, today)
+                st.session_state.progress_dirty = True
+            st.session_state.wrong_answers.append(curr_q)
+            st.session_state.is_first_attempt = False
+        st.session_state.retry_mode = True
+
 
 def check_level_test_answer_callback(curr_q):
     idx = st.session_state.test_idx
@@ -125,9 +244,24 @@ def go_next_question():
     st.session_state.is_first_attempt = True
     st.session_state.retry_mode = False
 
+
+def flush_pending_data(username):
+    """퀴즈 진행 중 누적된 로그/진도를 한 번에 저장"""
+    # pending_logs: [[timestamp, date, word_id, username, level, is_correct], ...]
+    pending = st.session_state.get("pending_logs", [])
+    if pending:
+        utils.log_study_results_batch(pending)
+        st.session_state.pending_logs = []
+
+    if st.session_state.get("progress_dirty", False) and "progress_df" in st.session_state:
+        # 속도 개선 저장 사용
+        utils.save_progress_fast(username, st.session_state.progress_df)
+        st.session_state.progress_dirty = False
+
+
 def handle_session_end(username, progress_df, today):
     df = utils.load_data()
-    user_info = utils.get_user_info(username)
+    user_info = _get_cached_user_info(username)
     current_level = int(user_info['level']) if user_info and pd.notna(user_info['level']) else 1
     
     # 학습 로그 분석 (구글 시트)
@@ -156,6 +290,7 @@ def handle_session_end(username, progress_df, today):
                     with c1:
                         if st.button("✅ 네, 이동", key="btn_down_yes", use_container_width=True):
                             utils.update_user_level(username, new_level)
+                            st.session_state.user_info_stale = True
                             st.session_state.page = 'dashboard'
                             st.rerun()
                     with c2:
@@ -185,6 +320,7 @@ def handle_session_end(username, progress_df, today):
                         st.markdown(f"<h3 style='text-align: center;'>축하합니다! Level {new_level} 승급!</h3>", unsafe_allow_html=True)
                         if st.button("🎉 계속하기", key="btn_up_yes", use_container_width=True):
                             utils.update_user_level(username, new_level)
+                            st.session_state.user_info_stale = True
                             st.rerun()
                     return
 
@@ -193,15 +329,15 @@ def handle_session_end(username, progress_df, today):
     _, col, _ = st.columns([1, 2, 1])
     with col:
         if st.session_state.wrong_answers:
-            st.warning(f"오답 {len(st.session_state.wrong_answers)}개를 재학습합니다.")
-            if st.button("오답 노트 시작", use_container_width=True):
-                st.session_state.quiz_list = st.session_state.wrong_answers
-                st.session_state.wrong_answers = []
-                st.session_state.current_idx = 0
-                st.session_state.retry_mode = False
-                st.session_state.quiz_state = "answering"
-                st.session_state.quiz_mode = "wrong_review"
-                st.rerun()
+            # 안내 화면 없이 바로 오답노트로 전환
+            st.session_state.quiz_list = st.session_state.wrong_answers
+            st.session_state.wrong_answers = []
+            st.session_state.current_idx = 0
+            st.session_state.retry_mode = False
+            st.session_state.is_first_attempt = True
+            st.session_state.quiz_state = "answering"
+            st.session_state.quiz_mode = "wrong_review"
+            st.rerun()
         else:
             st.balloons()
             with st.container(border=True):
@@ -514,6 +650,7 @@ def show_level_test_page():
                 with col_y:
                     if st.button("✅ 시작하기", type="primary", use_container_width=True):
                         utils.update_user_level(st.session_state.username, new_level)
+                        st.session_state.user_info_stale = True
                         st.success(f"레벨 {new_level}로 시작합니다!")
                         time.sleep(1)
                         st.session_state.is_level_testing = False
@@ -607,7 +744,7 @@ def show_level_test_page():
 
 def show_dashboard_page():
     username = st.session_state.username
-    user_info = utils.get_user_info(username)
+    user_info = _get_cached_user_info(username)
     realname = user_info['name'] if user_info else username
     user_level = int(user_info['level']) if user_info and pd.notna(user_info['level']) else 1
     
@@ -675,15 +812,33 @@ def show_dashboard_page():
 
 def show_quiz_page():
     username = st.session_state.username
-    df = utils.load_data()
-    if df is None: 
+
+    # ✅ (속도) voca_db / user_info / progress를 매 문제마다 다시 읽지 않도록 세션에 캐시
+    if "voca_df" not in st.session_state or st.session_state.voca_df is None:
+        with st.spinner('로딩중… 단어 DB를 불러오는 중입니다.'):
+            st.session_state.voca_df = utils.load_data()
+    df = st.session_state.voca_df
+    if df is None:
         st.error("DB 연결 오류")
         return
 
-    user_info = utils.get_user_info(username)
-    user_level = int(user_info['level']) if user_info and pd.notna(user_info['level']) else 1
-    
-    progress_df = utils.load_user_progress(username)
+    if st.session_state.get("user_level_username") != username or "user_level" not in st.session_state:
+        user_info = _get_cached_user_info(username)
+        st.session_state.user_level = int(user_info['level']) if user_info and pd.notna(user_info.get('level')) else 1
+        st.session_state.user_level_username = username
+    user_level = st.session_state.user_level
+
+    # progress는 퀴즈 시작 시 1회 로딩 (이후에는 메모리에서만 업데이트)
+    if st.session_state.get("progress_username") != username or "progress_df" not in st.session_state:
+        st.session_state.progress_df = utils.load_user_progress(username)
+        st.session_state.progress_username = username
+        st.session_state.progress_dirty = False
+
+    progress_df = st.session_state.progress_df
+
+    # 배치 저장용 로그 버퍼
+    st.session_state.setdefault("pending_logs", [])
+
     real_today = utils.get_korea_today()
     if st.session_state.get('is_tomorrow_mode', False):
         today = real_today + timedelta(days=1)
@@ -693,9 +848,16 @@ def show_quiz_page():
     batch_size = st.session_state.batch_size
 
     with st.sidebar:
-        if st.button("🏠 홈으로 (대시보드)"):
-            st.session_state.page = 'dashboard'
-            st.rerun()
+        # 속도 옵션
+        st.session_state.tts_auto = st.toggle('🔊 문장 자동 음성(TTS)', value=st.session_state.get('tts_auto', False))
+
+        if st.button('💾 지금 저장(동기화)', use_container_width=True, disabled=st.session_state.get('_busy_ui', False)):
+            _request_action('sync_now', {'username': username}, message='저장 중입니다. 잠시만 기다려주세요…')
+
+        st.divider()
+
+        if st.button("🏠 홈으로 (대시보드)", disabled=st.session_state.get('_busy_ui', False)):
+            _request_action('go_home', {'username': username}, message='대시보드로 이동 중입니다. 잠시만 기다려주세요…')
         st.divider()
         st.caption(f"학습 세트: {batch_size}문항")
         if st.session_state.get('is_tomorrow_mode', False):
@@ -773,25 +935,40 @@ def show_quiz_page():
              return
 
         if st.session_state.current_idx >= len(st.session_state.quiz_list):
-            handle_session_end(username, progress_df, today)
+            # ✅ 일반 세트가 끝났고 오답이 남아있으면, 안내 화면 없이 바로 오답노트로 직행
+            if st.session_state.get("quiz_mode") == "normal" and st.session_state.wrong_answers:
+                st.session_state.quiz_list = st.session_state.wrong_answers
+                st.session_state.wrong_answers = []
+                st.session_state.current_idx = 0
+                st.session_state.retry_mode = False
+                st.session_state.is_first_attempt = True
+                st.session_state.quiz_state = "answering"
+                st.session_state.quiz_mode = "wrong_review"
+                st.rerun()
+
+            # (오답노트까지 끝난 뒤에) 누적 데이터 저장 후 레벨 심사
+            flush_pending_data(username)
+            handle_session_end(username, st.session_state.progress_df, today)
             return
 
         idx = st.session_state.current_idx
         curr_q = st.session_state.quiz_list[idx]
         target = curr_q['target_word']
         
-        # TTS 생성
+        
+
+
+        # TTS 생성(옵션): 자동 음성은 느릴 수 있어 토글로 제어
         tts_key = f"tts_{curr_q['id']}"
-        if tts_key not in st.session_state:
-            st.session_state[tts_key] = utils.text_to_speech(curr_q['sentence_en'])
+        if st.session_state.get("tts_auto", False):
+            if tts_key not in st.session_state:
+                st.session_state[tts_key] = utils.text_to_speech(curr_q['sentence_en'])
 
         st.write(f"**Question {idx + 1} / {len(st.session_state.quiz_list)}**")
         st.progress((idx) / len(st.session_state.quiz_list))
 
         if st.session_state.quiz_state == "answering":
             with st.container(border=True):
-                if st.session_state.get("quiz_mode") == "wrong_review":
-                    st.warning("🔥 오답 재학습 중")
                 st.subheader(f"💡 뜻: {curr_q['meaning']}")
                 st.write(f"📖 해석: {curr_q['sentence_ko']}")
                 masked_sentence = utils.get_masked_sentence(curr_q['sentence_en'], target, curr_q.get('root_word'))
@@ -821,6 +998,24 @@ def show_quiz_page():
                     st.audio(st.session_state[tts_key], format='audio/mp3', autoplay=True)
 
             if st.button("다음 문제 ➡ (Enter)", type="primary", key=f"next_btn_{idx}", use_container_width=True, on_click=go_next_question):
+                pass
+            utils.focus_element("button")
+
+        elif st.session_state.quiz_state == "review_fail":
+            with st.container(border=True):
+                root = curr_q.get('root_word', '')
+                if root and isinstance(root, str) and root.strip() and root.lower() != target.lower():
+                    st.info(f"정답은 **{target}** 입니다. (원형: {root})")
+                else:
+                    st.info(f"정답은 **{target}** 입니다.")
+
+                highlighted_html = utils.get_highlighted_sentence(curr_q['sentence_en'], target)
+                st.markdown(f"""<div class="success-sentence-box">{highlighted_html}</div>""", unsafe_allow_html=True)
+
+                if tts_key in st.session_state and st.session_state[tts_key]:
+                    st.audio(st.session_state[tts_key], format='audio/mp3', autoplay=True)
+
+            if st.button("다음 문제 ➡ (Enter)", type="primary", key=f"next_btn_fail_{idx}", use_container_width=True, on_click=go_next_question):
                 pass
             utils.focus_element("button")
 
