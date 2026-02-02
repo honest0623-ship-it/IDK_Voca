@@ -206,10 +206,18 @@ def get_user_info(username):
     
     if username in df['username'].values:
         user_row = df[df['username'] == username].iloc[0]
-        # level 컬럼 처리
-        lv = user_row.get('level', 1)
-        if pd.isna(lv) or str(lv).strip() == '': lv = 1
-        return {'level': int(lv), 'name': user_row['name']}
+        
+        # [수정됨] 레벨이 비어있으면 1로 채우지 말고 그냥 None(빈값)으로 둬라!
+        lv = user_row.get('level', '')
+        if pd.isna(lv) or str(lv).strip() == '':
+            final_lv = None  # 레벨 테스트 대상
+        else:
+            try:
+                final_lv = int(lv)
+            except:
+                final_lv = 1
+                
+        return {'level': final_lv, 'name': user_row['name']}
     return None
 
 def register_user(username, password, name):
@@ -222,9 +230,11 @@ def register_user(username, password, name):
         return "EXIST"
         
     hashed_pw = make_hashes(password)
-    # users 시트 순서: username, password, name, level
+    
+    # [수정됨] 가입할 때 레벨을 '1'이 아니라 빈칸("")으로 저장해라!
     try:
-        ws.append_row([username, hashed_pw, name, 1])
+        # users 시트 순서: username, password, name, level
+        ws.append_row([username, hashed_pw, name, ""]) 
         return "SUCCESS"
     except Exception as e:
         st.error(f"가입 에러: {e}")
