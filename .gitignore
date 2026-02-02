@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+
+# 🚫 개인정보 및 로그 파일은 깃허브에 올리지 않음
+users.csv
+progress_*.csv
+study_log_*.csv
+
+# ✅ (참고) 단어장 파일(Voca_DB_Integrated.csv)은 
+# 여기에 적지 않았으므로 정상적으로 깃허브에 올라갑니다.

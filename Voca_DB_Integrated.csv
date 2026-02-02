@@ -1,0 +1,102 @@
+﻿id,root_word,target_word,meaning,sentence_en,sentence_ko,level,chapter,source,pos,total_try,total_wrong,last_level_update
+1,study,studies,공부하다,She studies English every morning.,그녀는 매일 아침 영어를 공부한다.,1,3인칭단수,Basic,,0,0,2026-02-01
+2,go,went,가다,We went to the park yesterday.,우리는 어제 공원에 갔다.,1,과거시제,Basic,,0,0,2026-02-01
+3,child,children,아이,Many children are playing in the park.,많은 아이들이 공원에서 놀고 있다.,1,복수형,Basic,,0,0,2026-02-01
+4,agree,agreed,동의하다,We all agreed on the plan.,우리 모두 그 계획에 동의했다.,1,3단원,Expanded by AI,,0,0,2026-02-01
+5,appear,appeared,나타나다,A rainbow appeared in the sky.,하늘에 무지개가 나타났다.,1,1단원,Expanded by AI,,0,0,2026-02-01
+6,believe,believes,믿다,He believes that anything is possible.,그는 무엇이든 가능하다고 믿는다.,1,명사절,Expanded by AI,,0,0,2026-02-01
+7,borrow,borrowed,빌리다,I borrowed a book from the library.,나는 도서관에서 책을 빌렸다.,1,과거시제,Expanded by AI,,0,0,2026-02-01
+8,careful,careful,조심스러운,Be careful when you cross the street.,길을 건널 때 조심해라.,1,형용사,Expanded by AI,,0,0,2026-02-01
+9,collect,collects,모으다,My brother collects old coins.,내 남동생은 옛날 동전들을 모은다.,1,3인칭단수,Expanded by AI,,0,0,2026-02-01
+10,discover,discovered,발견하다,Columbus discovered America in 1492.,콜럼버스는 1492년에 아메리카를 발견했다.,1,역사,Expanded by AI,,0,0,2026-02-01
+11,dream,dreaming,꿈꾸다,I am dreaming of a white Christmas.,나는 화이트 크리스마스를 꿈꾸고 있다.,1,진행형,Expanded by AI,,0,0,2026-02-01
+12,enjoy,enjoyed,즐기다,We enjoyed the concert very much.,우리는 그 콘서트를 매우 즐겼다.,1,과거시제,Expanded by AI,,0,0,2026-02-01
+13,feel,feels,느끼다,He feels happy today.,그는 오늘 행복하다고 느낀다.,1,감각동사,Expanded by AI,,0,0,2026-02-01
+14,follow,followed,따라가다,The dog followed its owner.,그 개는 주인을 따라갔다.,1,과거시제,Expanded by AI,,0,0,2026-02-01
+15,forget,forgot,잊다,I forgot to bring my umbrella.,나는 우산을 가져오는 것을 잊었다.,1,to부정사,Expanded by AI,,0,0,2026-02-01
+16,happen,happened,일어나다,What happened to your arm?,네 팔에 무슨 일이 일어났니?,1,의문문,Expanded by AI,,0,0,2026-02-01
+17,healthy,healthy,건강한,Eating vegetables is a healthy habit.,채소를 먹는 것은 건강한 습관이다.,1,형용사,Expanded by AI,,0,0,2026-02-01
+18,help,helps,돕다,Exercise helps you stay fit.,운동은 당신이 건강을 유지하도록 돕는다.,1,사역동사,Expanded by AI,,0,0,2026-02-01
+19,hope,hope,바라다,I hope to see you again soon.,곧 당신을 다시 보길 바랍니다.,1,to부정사,Expanded by AI,,0,0,2026-02-01
+20,introduce,introduce,소개하다,Let me introduce myself.,제 소개를 하겠습니다.,1,재귀대명사,Expanded by AI,,0,0,2026-02-01
+21,invite,invited,초대하다,I invited them to my party.,나는 그들을 내 파티에 초대했다.,1,과거시제,Expanded by AI,,0,0,2026-02-01
+22,join,joined,가입하다,He joined the soccer club.,그는 축구 동아리에 가입했다.,1,과거시제,Expanded by AI,,0,0,2026-02-01
+23,laugh,laughed,웃다,Everyone laughed at the joke.,모두가 그 농담을 보고 웃었다.,1,과거시제,Expanded by AI,,0,0,2026-02-01
+24,learn,learning,배우다,Learning a new language is fun.,새로운 언어를 배우는 것은 재미있다.,1,동명사,Expanded by AI,,0,0,2026-02-01
+25,leave,leaves,떠나다,The bus leaves at 8 o'clock.,버스는 8시에 떠난다.,1,3인칭단수,Expanded by AI,,0,0,2026-02-01
+26,listen,listening,듣다,She likes listening to music.,그녀는 음악 듣는 것을 좋아한다.,1,동명사,Expanded by AI,,0,0,2026-02-01
+27,mistake,mistake,실수,Don't be afraid of making a mistake.,실수하는 것을 두려워하지 마라.,1,명사,Expanded by AI,,0,0,2026-02-01
+28,move,moved,움직이다,They moved to a new house last week.,그들은 지난주에 새 집으로 이사했다.,1,과거시제,Expanded by AI,,0,0,2026-02-01
+29,neighbor,neighbors,이웃,We are friendly with our neighbors.,우리는 이웃들과 친하게 지낸다.,1,명사,Expanded by AI,,0,0,2026-02-01
+30,order,ordered,주문하다,I ordered pizza for dinner.,나는 저녁으로 피자를 주문했다.,1,과거시제,Expanded by AI,,0,0,2026-02-01
+31,paint,painted,칠하다,They painted the wall blue.,그들은 벽을 파란색으로 칠했다.,1,5형식,Expanded by AI,,0,0,2026-02-01
+32,plan,planning,계획하다,We are planning a surprise party.,우리는 깜짝 파티를 계획하고 있다.,1,현재진행형,Expanded by AI,,0,0,2026-02-01
+33,popular,popular,인기 있는,The singer is very popular among teens.,그 가수는 십 대들 사이에서 매우 인기가 있다.,1,형용사,Expanded by AI,,0,0,2026-02-01
+34,present,present,선물,He gave me a birthday present.,그는 나에게 생일 선물을 주었다.,1,명사,Expanded by AI,,0,0,2026-02-01
+35,receive,received,받다,I received a letter from my friend.,나는 친구로부터 편지를 받았다.,1,과거시제,Expanded by AI,,0,0,2026-02-01
+36,repeat,repeated,반복하다,He repeated the question slowly.,그는 질문을 천천히 반복했다.,1,과거시제,Expanded by AI,,0,0,2026-02-01
+37,respect,respect,존경하다,Children should respect their parents.,아이들은 부모님을 존경해야 한다.,1,조동사,Expanded by AI,,0,0,2026-02-01
+38,return,returned,돌아오다,She returned from her trip yesterday.,그녀는 어제 여행에서 돌아왔다.,1,과거시제,Expanded by AI,,0,0,2026-02-01
+39,review,review,검토하다,Let's review the lesson together.,그 단원을 함께 복습합시다.,1,권유문,Expanded by AI,,0,0,2026-02-01
+40,save,saved,구하다,The hero saved the girl from the fire.,영웅이 화재 속에서 소녀를 구했다.,1,과거시제,Expanded by AI,,0,0,2026-02-01
+41,share,shared,공유하다,We shared a pizza for lunch.,우리는 점심으로 피자를 나누어 먹었다.,1,과거시제,Expanded by AI,,0,0,2026-02-01
+42,smile,smiled,미소 짓다,She smiled at the baby.,그녀는 아기를 보고 미소 지었다.,1,과거시제,Expanded by AI,,0,0,2026-02-01
+43,special,special,특별한,Today is a very special day.,오늘은 매우 특별한 날이다.,1,형용사,Expanded by AI,,0,0,2026-02-01
+44,spend,spent,보내다,I spent my vacation in Jeju Island.,나는 제주도에서 방학을 보냈다.,1,과거시제,Expanded by AI,,0,0,2026-02-01
+45,travel,traveling,여행하다,She enjoys traveling around the world.,그녀는 세계 여행하는 것을 즐긴다.,1,동명사,Expanded by AI,,0,0,2026-02-01
+46,understand,understand,이해하다,I don't understand the question.,나는 그 질문을 이해하지 못하겠다.,1,부정문,Expanded by AI,,0,0,2026-02-01
+47,visit,visited,방문하다,We visited our grandmother last Sunday.,우리는 지난 일요일에 할머니 댁을 방문했다.,1,과거시제,Expanded by AI,,0,0,2026-02-01
+48,worry,worried,걱정하다,My mother was worried about me.,어머니는 나를 걱정하셨다.,1,과거시제,Expanded by AI,,0,0,2026-02-01
+49,achieve,achieved,성취하다,He achieved his goal last year.,그는 작년에 목표를 성취했다.,2,1단원,Grammar Inside,,0,0,2026-02-01
+50,achieve,achieved,성취하다,He achieved his goal last year.,그는 작년에 목표를 성취했다.,2,1단원,Grammar Inside,,0,0,2026-02-01
+51,accept,accepted,받아들이다,She accepted the gift with a smile.,그녀는 미소와 함께 선물을 받아들였다.,2,1단원,Expanded by AI,,0,0,2026-02-01
+52,allow,allowed,허락하다,He was allowed to go out late.,그는 늦게 나가는 것을 허락받았다.,2,수동태,Expanded by AI,,0,0,2026-02-01
+53,avoid,avoid,피하다,You should avoid eating too much sugar.,당신은 설탕을 너무 많이 먹는 것을 피해야 한다.,2,동명사,Expanded by AI,,0,0,2026-02-01
+54,change,changed,바꾸다,The weather changed suddenly.,날씨가 갑자기 바뀌었다.,2,1단원,Expanded by AI,,0,0,2026-02-01
+55,choose,chose,선택하다,She chose the red dress for the party.,그녀는 파티를 위해 빨간 드레스를 선택했다.,2,불규칙동사,Expanded by AI,,0,0,2026-02-01
+56,complain,complained,불평하다,He complained about the noise.,그는 소음에 대해 불평했다.,2,1단원,Expanded by AI,,0,0,2026-02-01
+57,continue,continued,계속하다,The rain continued for three days.,비가 3일 동안 계속되었다.,2,과거시제,Expanded by AI,,0,0,2026-02-01
+58,decide,decided,결정하다,They decided to travel to Europe.,그들은 유럽으로 여행하기로 결정했다.,2,to부정사,Expanded by AI,,0,0,2026-02-01
+59,disappear,disappeared,사라지다,The magician disappeared suddenly.,마술사가 갑자기 사라졌다.,2,과거시제,Expanded by AI,,0,0,2026-02-01
+60,divide,divided,나누다,The cake was divided into eight pieces.,케이크는 여덟 조각으로 나누어졌다.,2,수동태,Expanded by AI,,0,0,2026-02-01
+61,explain,explained,설명하다,The teacher explained the rule clearly.,선생님은 그 규칙을 명확하게 설명해 주셨다.,2,1단원,Expanded by AI,,0,0,2026-02-01
+62,forgive,forgive,용서하다,Please forgive me for being late.,늦어서 죄송합니다(용서해 주세요).,2,명령문,Expanded by AI,,0,0,2026-02-01
+63,guess,guessing,추측하다,Stop guessing and start studying.,추측 그만하고 공부 시작해라.,2,동명사,Expanded by AI,,0,0,2026-02-01
+64,improve,improved,향상시키다,His English has improved a lot.,그의 영어 실력이 많이 향상되었다.,2,현재완료,Expanded by AI,,0,0,2026-02-01
+65,include,includes,포함하다,The price includes tax.,그 가격은 세금을 포함한다.,2,3인칭단수,Expanded by AI,,0,0,2026-02-01
+66,information,information,정보,Where can I get more information?,어디서 더 많은 정보를 얻을 수 있나요?,2,명사,Expanded by AI,,0,0,2026-02-01
+67,keep,keeps,유지하다,She always keeps her room clean.,그녀는 항상 방을 깨끗하게 유지한다.,2,5형식,Expanded by AI,,0,0,2026-02-01
+68,memory,memory,기억,She has a good memory for names.,그녀는 이름을 잘 기억한다.,2,명사,Expanded by AI,,0,0,2026-02-01
+69,offer,offered,제공하다,He offered to help me with the bags.,그는 내 가방을 들어주겠다고 제안했다.,2,to부정사,Expanded by AI,,0,0,2026-02-01
+70,pollution,pollution,오염,Air pollution is a serious problem.,대기 오염은 심각한 문제이다.,2,명사,Expanded by AI,,0,0,2026-02-01
+71,prepare,prepared,준비하다,I prepared a special dinner for you.,나는 당신을 위해 특별한 저녁을 준비했다.,2,과거시제,Expanded by AI,,0,0,2026-02-01
+72,promise,promised,약속하다,She promised not to tell anyone.,그녀는 아무에게도 말하지 않기로 약속했다.,2,to부정사,Expanded by AI,,0,0,2026-02-01
+73,protect,protect,보호하다,We must protect the environment.,우리는 환경을 보호해야 한다.,2,조동사,Expanded by AI,,1,1,2026-02-01
+74,provide,provided,공급하다,Trees provide us with oxygen.,나무는 우리에게 산소를 공급한다.,2,1단원,Expanded by AI,,0,0,2026-02-01
+75,recycle,recycling,재활용하다,Recycling helps protect the earth.,재활용은 지구를 보호하는 데 도움이 된다.,2,동명사,Expanded by AI,,0,0,2026-02-01
+76,reduce,reduce,줄이다,We should reduce our use of plastic.,우리는 플라스틱 사용을 줄여야 한다.,2,조동사,Expanded by AI,,0,0,2026-02-01
+77,remember,remember,기억하다,I remember meeting him before.,나는 전에 그를 만났던 것을 기억한다.,2,동명사,Expanded by AI,,0,0,2026-02-01
+78,repair,repaired,수리하다,My father repaired the broken bike.,아버지는 고장 난 자전거를 수리하셨다.,2,과거시제,Expanded by AI,,0,0,2026-02-01
+79,serious,serious,심각한,The doctor said it was not serious.,의사는 심각하지 않다고 말했다.,2,형용사,Expanded by AI,,0,0,2026-02-01
+80,support,supports,지지하다,My family always supports me.,우리 가족은 항상 나를 지지해 준다.,2,3인칭단수,Expanded by AI,,0,0,2026-02-01
+81,surprise,surprised,놀라게 하다,The news surprised everyone.,그 소식은 모두를 놀라게 했다.,2,과거시제,Expanded by AI,,0,0,2026-02-01
+82,break,broken,깨뜨리다,The window was broken by the ball.,그 창문은 공에 의해 깨졌다.,3,수동태,Basic,,0,0,2026-02-01
+83,advise,advises,조언하다,The doctor advises me to exercise more.,의사는 나에게 운동을 더 하라고 조언한다.,3,2단원,Expanded by AI,,0,0,2026-02-01
+84,compare,compare,비교하다,Don't compare yourself with others.,자신을 다른 사람과 비교하지 마라.,3,2단원,Expanded by AI,,0,0,2026-02-01
+85,create,created,창조하다,God created the world.,신이 세상을 창조했다.,3,2단원,Expanded by AI,,0,0,2026-02-01
+86,describe,described,설명하다,She described the man to the police.,그녀는 그 남자를 경찰에게 설명했다.,3,1단원,Expanded by AI,,0,0,2026-02-01
+87,destroy,destroyed,파괴하다,The fire destroyed the building.,그 화재가 건물을 파괴했다.,3,수동태,Expanded by AI,,0,0,2026-02-01
+88,discuss,discussing,토론하다,They are discussing the new project.,그들은 새 프로젝트에 대해 토론하고 있다.,3,진행형,Expanded by AI,,0,0,2026-02-01
+89,encourage,encouraged,격려하다,My teacher encouraged me to try again.,선생님은 내가 다시 시도하도록 격려해 주셨다.,3,5형식,Expanded by AI,,0,0,2026-02-01
+90,expect,expecting,기대하다,Are you expecting a phone call?,전화 올 데가 있니?,3,현재진행형,Expanded by AI,,0,0,2026-02-01
+91,imagine,imagine,상상하다,Can you imagine living on Mars?,화성에서 사는 것을 상상할 수 있니?,3,동명사,Expanded by AI,,0,0,2026-02-01
+92,increase,increased,증가하다,The population has increased recently.,인구가 최근에 증가했다.,3,현재완료,Expanded by AI,,0,0,2026-02-01
+93,manage,managed,관리하다,He managed to finish the work on time.,그는 제시간에 일을 끝낼 수 있었다.,3,to부정사,Expanded by AI,,0,0,2026-02-01
+94,measure,measures,측정하다,This tool measures the length.,이 도구는 길이를 측정한다.,3,3인칭단수,Expanded by AI,,0,0,2026-02-01
+95,mention,mentioned,언급하다,He mentioned your name during the meeting.,그는 회의 중에 당신의 이름을 언급했다.,3,과거시제,Expanded by AI,,0,0,2026-02-01
+96,notice,noticed,알아차리다,I noticed that she was crying.,나는 그녀가 울고 있다는 것을 알아차렸다.,3,명사절,Expanded by AI,,0,0,2026-02-01
+97,participate,participated,참여하다,Many students participated in the contest.,많은 학생들이 그 대회에 참여했다.,3,과거시제,Expanded by AI,,0,0,2026-02-01
+98,perform,performed,수행하다,The actors performed well on stage.,배우들이 무대에서 연기를 잘했다.,3,과거시제,Expanded by AI,,0,0,2026-02-01
+99,prevent,prevent,예방하다,Wash your hands to prevent illness.,병을 예방하기 위해 손을 씻으세요.,3,to부정사,Expanded by AI,,0,0,2026-02-01
+100,separate,separate,분리된,The children sleep in separate rooms.,아이들은 각자 다른 방에서 잔다.,3,형용사,Expanded by AI,,0,0,2026-02-01
+101,succeed,succeeded,성공하다,She succeeded in passing the exam.,그녀는 시험에 합격하는 데 성공했다.,3,전치사,Expanded by AI,,0,0,2026-02-01
