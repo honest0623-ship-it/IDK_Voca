@@ -3,36 +3,69 @@ import hashlib
 import os
 from datetime import datetime, timedelta
 import pytz
-import glob
 import streamlit as st
 import streamlit.components.v1 as components
 from gtts import gTTS
 import io
 import re
 import random
-
 import calendar
-# --- 설정 및 경로 ---
-DB_FILE_PATTERN = 'Voca_DB_Integrated.csv'
-USER_FILE = 'users.csv'
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
-# 등업 기준
+# --- 1. 구글 시트 연결 설정 ---
+SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+
+try:
+    # Streamlit Secrets에서 로봇 키 가져오기
+    # (주의: 딕셔너리 형태로 변환하여 사용)
+    gcp_info = dict(st.secrets["gcp_service_account"])
+    
+    # [중요] private_key의 줄바꿈 문자(\n) 처리
+    if "private_key" in gcp_info:
+        gcp_info["private_key"] = gcp_info["private_key"].replace("\\n", "\n")
+
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(gcp_info, SCOPE)
+    client = gspread.authorize(creds)
+except Exception as e:
+    # 로컬 테스트용 (secrets가 없을 때)
+    client = None
+
+# 연결할 스프레드시트 이름 (파일 제목과 정확히 같아야 함)
+SHEET_NAME = "Voca_DB"
+
+# --- 2. 기본 상수 설정 ---
 LEVEL_UP_INTERVAL_DAYS = 7
 LEVEL_UP_RATIO = 0.8
 LEVEL_UP_MIN_COUNT = 30
-
-# 레벨 다운 기준
 LEVEL_DOWN_ACCURACY = 0.4
-
-# 레벨 조정 심사 최소 조건
 MIN_TRAIN_DAYS = 3
 MIN_TRAIN_COUNT = 50
-
-# 보안 설정
 SIGNUP_SECRET_CODE = "math2026"
 ADMIN_PASSWORD = "teacher1234"
+SRS_STEPS_DAYS = [1, 3, 7, 14, 60]
 
-# --- 보안 함수 ---
+# --- 3. 헬퍼 함수: 시트 데이터 가져오기 ---
+def get_worksheet(tab_name):
+    """특정 탭(워크시트)을 가져오는 함수"""
+    if client is None: return None
+    try:
+        sh = client.open(SHEET_NAME)
+        return sh.worksheet(tab_name)
+    except Exception as e:
+        st.error(f"워크시트 '{tab_name}' 로딩 실패: {e}")
+        return None
+
+def read_sheet_to_df(tab_name):
+    """특정 탭의 데이터를 읽어서 DataFrame으로 변환"""
+    ws = get_worksheet(tab_name)
+    if ws:
+        data = ws.get_all_records()
+        df = pd.DataFrame(data)
+        return df
+    return pd.DataFrame()
+
+# --- 4. 보안 및 시간 함수 ---
 def make_hashes(password):
     return hashlib.sha256(str.encode(password)).hexdigest()
 
@@ -41,116 +74,223 @@ def check_hashes(password, hashed_text):
         return hashed_text
     return False
 
-# --- 날짜/시간 함수 ---
 def get_korea_today():
     try:
         kst = pytz.timezone('Asia/Seoul')
         return datetime.now(kst).date()
-    except Exception: return datetime.now().date()
+    except: return datetime.now().date()
 
-# --- 데이터 로딩 ---
+def _add_months(date_obj, months: int):
+    y = date_obj.year + (date_obj.month - 1 + months) // 12
+    m = (date_obj.month - 1 + months) % 12 + 1
+    last_day = calendar.monthrange(y, m)[1]
+    d = min(date_obj.day, last_day)
+    return datetime(y, m, d).date()
+
+# --- 5. 데이터 로딩 (구글 시트 연동) ---
 @st.cache_data(ttl=60)
 def load_data():
-    if os.path.exists(DB_FILE_PATTERN):
-        files = [DB_FILE_PATTERN]
-    else:
-        files = glob.glob('Voca_DB*.csv')
-
-    if not files: return None
+    """단어장(voca_db) 데이터 로드"""
+    df = read_sheet_to_df('voca_db')
+    if df.empty: return None
     
-    combined_df = pd.DataFrame()
-    for filename in files:
-        try:
-            df = pd.read_csv(filename, encoding='utf-8-sig')
-            if 'level' not in df.columns: df['level'] = 1
-            if 'source' not in df.columns:
-                source_name = os.path.basename(filename).replace("Voca_DB", "").replace(".csv", "").strip(" _-")
-                df['source'] = source_name
-            if 'root_word' in df.columns:
-                df['root_word'] = df['root_word'].fillna('')
-            if 'id' not in df.columns:
-                df['id'] = range(1, len(df) + 1)
-            if 'total_try' not in df.columns: df['total_try'] = 0
-            if 'total_wrong' not in df.columns: df['total_wrong'] = 0
-                
-            combined_df = pd.concat([combined_df, df], ignore_index=True)
-        except Exception as e:
-            st.error(f"⚠️ {filename} 로딩 중 오류: {e}")
-            continue
-
-    if combined_df.empty: return None
-    if len(files) > 1:
-        combined_df = combined_df.reset_index(drop=True)
-        combined_df['id'] = combined_df.index + 1
-    return combined_df
+    # 필수 컬럼 보정 (없으면 에러 방지용으로 채움)
+    required_cols = ['id', 'target_word', 'meaning', 'level', 'sentence_en', 'sentence_ko', 'root_word', 'total_try', 'total_wrong']
+    for col in required_cols:
+        if col not in df.columns:
+            if col in ['total_try', 'total_wrong', 'level', 'id']: df[col] = 0
+            else: df[col] = ''
+            
+    # 숫자형 데이터 변환
+    df['level'] = pd.to_numeric(df['level'], errors='coerce').fillna(1).astype(int)
+    df['id'] = pd.to_numeric(df['id'], errors='coerce').fillna(0).astype(int)
+    return df
 
 def load_user_progress(username):
-    filename = f"progress_{username}.csv"
-    if os.path.exists(filename):
-        try:
-            df = pd.read_csv(filename)
-            df['next_review'] = pd.to_datetime(df['next_review']).dt.date
-            df['last_reviewed'] = pd.to_datetime(df['last_reviewed'], errors='coerce').dt.date
-            return df
-        except: pass
-    return pd.DataFrame(columns=['word_id', 'last_reviewed', 'next_review', 'interval', 'fail_count'])
+    """사용자의 학습 진도(user_progress) 로드"""
+    df = read_sheet_to_df('user_progress')
+    if df.empty:
+        return pd.DataFrame(columns=['username', 'word_id', 'last_reviewed', 'next_review', 'interval', 'fail_count'])
+    
+    # 해당 유저 데이터만 필터링
+    user_df = df[df['username'] == username].copy()
+    
+    # 날짜 컬럼 변환
+    for col in ['next_review', 'last_reviewed']:
+        if col in user_df.columns:
+            user_df[col] = pd.to_datetime(user_df[col], errors='coerce').dt.date
+            
+    return user_df
 
 def save_progress(username, progress_df):
-    filename = f"progress_{username}.csv"
-    try:
-        progress_df.to_csv(filename, index=False, encoding='utf-8-sig')
-    except PermissionError:
-        st.error("⚠️ 파일을 저장할 수 없습니다. 엑셀 파일이 열려있는지 확인해주세요.")
+    """
+    학습 진도 저장
+    (주의: 구글 시트는 부분 수정이 어려워, 전체를 읽고 해당 유저 부분만 갈아끼운 뒤 다시 덮어씁니다.)
+    """
+    ws = get_worksheet('user_progress')
+    if not ws: return
 
-# --- 학습 로그 ---
+    # 현재 유저의 데이터 정리
+    progress_df['username'] = username
+    progress_df['last_reviewed'] = progress_df['last_reviewed'].astype(str)
+    progress_df['next_review'] = progress_df['next_review'].astype(str)
+
+    try:
+        # 1. 전체 데이터 가져오기
+        all_data = ws.get_all_records()
+        all_df = pd.DataFrame(all_data)
+        
+        if not all_df.empty:
+            # 2. 기존 데이터에서 '이 유저가 아닌' 데이터만 남기기
+            other_users_df = all_df[all_df['username'] != username]
+            # 3. 내 데이터와 합치기
+            final_df = pd.concat([other_users_df, progress_df], ignore_index=True)
+        else:
+            final_df = progress_df
+
+        # 4. 시트 싹 지우고 다시 쓰기 (덮어쓰기)
+        ws.clear()
+        ws.update([final_df.columns.values.tolist()] + final_df.values.tolist())
+    except Exception as e:
+        st.error(f"⚠️ 저장 실패: {e}")
+
+# --- 6. 학습 로그 (Append Only) ---
 def log_study_result(username, word_id, level, is_correct):
-    log_file = f"study_log_{username}.csv"
+    ws = get_worksheet('study_log')
+    if not ws: return
+    
     today = get_korea_today()
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    new_data = pd.DataFrame([{
-        'timestamp': timestamp,
-        'date': today,
-        'word_id': word_id,
-        'username': username,
-        'level': level,
-        'is_correct': 1 if is_correct else 0
-    }])
-    
-    if not os.path.exists(log_file):
-        new_data.to_csv(log_file, index=False, encoding='utf-8-sig')
-    else:
-        try:
-            new_data.to_csv(log_file, mode='a', header=False, index=False, encoding='utf-8-sig')
-        except: pass 
+    # 순서: timestamp, date, word_id, username, level, is_correct
+    row = [timestamp, str(today), int(word_id), username, int(level), 1 if is_correct else 0]
+    try:
+        ws.append_row(row)
+    except Exception as e:
+        print(f"Log Error: {e}")
 
 def load_study_log(username):
-    log_file = f"study_log_{username}.csv"
-    if os.path.exists(log_file):
-        try: return pd.read_csv(log_file)
-        except: pass
-    return pd.DataFrame()
+    df = read_sheet_to_df('study_log')
+    if df.empty: return pd.DataFrame()
+    return df[df['username'] == username]
 
-# --- 사용자 정보 ---
+# --- 7. 사용자 정보 (로그인/회원가입) ---
 def get_user_info(username):
-    if not os.path.exists(USER_FILE): return None
-    users = pd.read_csv(USER_FILE)
-    if username in users['username'].values:
-        user_row = users[users['username'] == username].iloc[0]
-        user_level = user_row['level'] if 'level' in users.columns and pd.notna(user_row['level']) else None
-        real_name = user_row['name'] if 'name' in users.columns else username
-        return {'level': user_level, 'name': real_name}
+    df = read_sheet_to_df('users')
+    if df.empty: return None
+    
+    if username in df['username'].values:
+        user_row = df[df['username'] == username].iloc[0]
+        # level 컬럼 처리
+        lv = user_row.get('level', 1)
+        if pd.isna(lv) or str(lv).strip() == '': lv = 1
+        return {'level': int(lv), 'name': user_row['name']}
     return None
 
-def update_user_level(username, new_level):
-    if not os.path.exists(USER_FILE): return
-    users = pd.read_csv(USER_FILE)
-    if username in users['username'].values:
-        idx = users[users['username'] == username].index[0]
-        users.at[idx, 'level'] = new_level
-        users.to_csv(USER_FILE, index=False, encoding='utf-8-sig')
+def register_user(username, password, name):
+    ws = get_worksheet('users')
+    if not ws: return "ERROR"
+    
+    # 중복 아이디 체크
+    existing_df = read_sheet_to_df('users')
+    if not existing_df.empty and username in existing_df['username'].values:
+        return "EXIST"
+        
+    hashed_pw = make_hashes(password)
+    # users 시트 순서: username, password, name, level
+    try:
+        ws.append_row([username, hashed_pw, name, 1])
+        return "SUCCESS"
+    except Exception as e:
+        st.error(f"가입 에러: {e}")
+        return "ERROR"
 
-# --- 텍스트 유틸리티 ---
+def update_user_level(username, new_level):
+    ws = get_worksheet('users')
+    if not ws: return
+    
+    try:
+        # username이 있는 행 찾기
+        cell = ws.find(username)
+        # 그 행의 4번째 칸(D열, level) 업데이트
+        ws.update_cell(cell.row, 4, new_level)
+    except Exception as e:
+        st.error(f"레벨 업데이트 실패: {e}")
+
+def reset_user_password(username, new_password_str="1234"):
+    ws = get_worksheet('users')
+    if not ws: return
+    try:
+        cell = ws.find(username)
+        hashed_pw = make_hashes(new_password_str)
+        # 비밀번호는 2번째 칸(B열)
+        ws.update_cell(cell.row, 2, hashed_pw)
+        return True
+    except:
+        return False
+
+# --- 8. SRS 스케줄링 로직 ---
+def update_schedule(word_id, is_correct, progress_df, today):
+    # 컬럼이 없으면 생성
+    for col in ['fail_count', 'interval']:
+        if col not in progress_df.columns: progress_df[col] = 0
+    for col in ['last_reviewed', 'next_review']:
+        if col not in progress_df.columns: progress_df[col] = pd.NaT
+
+    def _to_int(x, default=0):
+        try: return int(float(x)) if pd.notna(x) else default
+        except: return default
+
+    def _next_step(cur_days):
+        if cur_days not in SRS_STEPS_DAYS:
+            cur_days = max([s for s in SRS_STEPS_DAYS if s <= cur_days], default=1)
+        if cur_days == 1: return 3
+        if cur_days == 3: return 7
+        if cur_days == 7: return 14
+        return 60 
+
+    # 기존 단어인지 확인
+    if word_id in progress_df['word_id'].values:
+        idx = progress_df[progress_df['word_id'] == word_id].index[0]
+        progress_df.loc[idx, 'last_reviewed'] = today
+        cur_fail = _to_int(progress_df.loc[idx, 'fail_count'], 0)
+        cur_interval = _to_int(progress_df.loc[idx, 'interval'], 0)
+
+        if is_correct:
+            if cur_fail > 0:
+                if cur_interval <= 0: cur_interval = 1
+                new_interval = _next_step(cur_interval)
+                progress_df.loc[idx, 'interval'] = int(new_interval)
+                progress_df.loc[idx, 'next_review'] = _add_months(today, 2) if new_interval >= 60 else today + timedelta(days=int(new_interval))
+            else:
+                progress_df.loc[idx, 'interval'] = 60
+                progress_df.loc[idx, 'next_review'] = _add_months(today, 2)
+        else:
+            progress_df.loc[idx, 'fail_count'] = int(cur_fail) + 1
+            progress_df.loc[idx, 'interval'] = 1
+            progress_df.loc[idx, 'next_review'] = today + timedelta(days=1)
+    else:
+        # 신규 단어 추가
+        new_row = {
+            'word_id': word_id,
+            'last_reviewed': today,
+            'interval': 60 if is_correct else 1,
+            'fail_count': 0 if is_correct else 1,
+            'next_review': _add_months(today, 2) if is_correct else today + timedelta(days=1)
+        }
+        progress_df = pd.concat([progress_df, pd.DataFrame([new_row])], ignore_index=True)
+    
+    return progress_df
+
+# --- 9. 기타 유틸 ---
+def text_to_speech(text):
+    try:
+        tts = gTTS(text=text, lang='en')
+        mp3_fp = io.BytesIO()
+        tts.write_to_fp(mp3_fp)
+        return mp3_fp
+    except: return None
+
 def get_masked_sentence(sentence, target_word, root_word=None):
     if not isinstance(sentence, str): return sentence
     words_to_mask = [str(target_word)]
@@ -165,188 +305,21 @@ def get_masked_sentence(sentence, target_word, root_word=None):
 def get_highlighted_sentence(sentence, target_word):
     if not isinstance(sentence, str): return sentence
     pattern = re.compile(re.escape(target_word), re.IGNORECASE)
-    replacement = r"<span style='color: #E74C3C; font-weight: 900; font-size: 1.2em;'>\g<0></span>"
-    return pattern.sub(replacement, sentence)
-
-@st.cache_data(show_spinner=False)
-def text_to_speech(text):
-    try:
-        tts = gTTS(text=text, lang='en')
-        mp3_fp = io.BytesIO()
-        tts.write_to_fp(mp3_fp)
-        return mp3_fp
-    except Exception as e: return None
+    return pattern.sub(r"<span style='color: #E74C3C; font-weight: 900; font-size: 1.2em;'>\g<0></span>", sentence)
 
 def focus_element(target_type="input"):
     components.html(
         f"""
-        <div id="focus_marker_{datetime.now().timestamp()}" style="display:none;"></div>
+        <div id="focus_marker_{datetime.now().timestamp()}"></div>
         <script>
-            function setFocus() {{
-                var targetType = "{target_type}";
-                var elementToFocus = null;
-                if (targetType === 'input') {{
-                    var inputs = window.parent.document.querySelectorAll('input[type="text"]');
-                    if (inputs.length > 0) {{ elementToFocus = inputs[inputs.length - 1]; }}
-                }} else if (targetType === 'button') {{
-                    var buttons = window.parent.document.querySelectorAll('button[kind="primary"]');
-                    if (buttons.length > 0) {{ elementToFocus = buttons[buttons.length - 1]; }}
-                }}
-                if (elementToFocus) {{ elementToFocus.focus(); }}
-            }}
-            setTimeout(setFocus, 300);
+            setTimeout(function() {{
+                var target = window.parent.document.querySelectorAll('{ "input[type=text]" if target_type == "input" else "button" }');
+                if (target.length > 0) {{ target[target.length - 1].focus(); }}
+            }}, 300);
         </script>
         """,
         height=0
     )
 
-# --- 🔥 [중요] 이름 통일된 SRS 스케줄링 로직 ---
-# --- 🔁 망각곡선(Spaced Repetition) 스케줄 ---
-# - 오답(한 번이라도 틀린 단어): 1일 → 3일 → 7일 → 14일 → 2개월(≈ +2 months)
-# - '처음 출제에서 바로 정답' 단어(오답 이력 없음): 2개월(≈ +2 months)마다
-_SRS_STEPS_DAYS = [1, 3, 7, 14, 60]  # 60은 저장용(통계/표시). 실제 날짜는 월 단위로 +2개월 처리.
-
-def _add_months(date_obj, months: int):
-    """date_obj에 months만큼 더한 날짜를 반환(말일은 자동 보정)."""
-    y = date_obj.year + (date_obj.month - 1 + months) // 12
-    m = (date_obj.month - 1 + months) % 12 + 1
-    last_day = calendar.monthrange(y, m)[1]
-    d = min(date_obj.day, last_day)
-    return datetime(y, m, d).date()
-
-def update_schedule(word_id, is_correct, progress_df, today):
-    # 컬럼 호환 (예전 progress 파일이 컬럼을 누락했을 수 있음)
-    if 'fail_count' not in progress_df.columns:
-        progress_df['fail_count'] = 0
-    if 'last_reviewed' not in progress_df.columns:
-        progress_df['last_reviewed'] = pd.NaT
-    if 'next_review' not in progress_df.columns:
-        progress_df['next_review'] = pd.NaT
-    if 'interval' not in progress_df.columns:
-        progress_df['interval'] = 0
-
-    def _to_int(x, default=0):
-        try:
-            if pd.isna(x): 
-                return default
-        except Exception:
-            pass
-        try:
-            return int(float(x))
-        except Exception:
-            return default
-
-    def _next_step(cur_days: int):
-        # cur_days가 steps에 없으면, 가장 가까운 하위 step으로 보정
-        if cur_days not in _SRS_STEPS_DAYS:
-            cur_days = max([s for s in _SRS_STEPS_DAYS if s <= cur_days], default=1)
-        if cur_days == 1: return 3
-        if cur_days == 3: return 7
-        if cur_days == 7: return 14
-        return 60  # 14 이상이면 최종(2개월)
-
-    if word_id in progress_df['word_id'].values:
-        idx = progress_df[progress_df['word_id'] == word_id].index[0]
-
-        # 오늘 학습 기록
-        progress_df.loc[idx, 'last_reviewed'] = today
-
-        cur_fail = _to_int(progress_df.loc[idx, 'fail_count'], 0)
-        cur_interval = _to_int(progress_df.loc[idx, 'interval'], 0)
-
-        if is_correct:
-            # 오답 이력이 있으면: 1→3→7→14→2개월
-            if cur_fail > 0:
-                # 혹시 과거 데이터에서 interval=0으로 남아있다면 1로 보정
-                if cur_interval <= 0:
-                    cur_interval = 1
-                new_interval = _next_step(cur_interval)
-                progress_df.loc[idx, 'interval'] = int(new_interval)
-
-                if new_interval >= 60:
-                    progress_df.loc[idx, 'next_review'] = _add_months(today, 2)
-                else:
-                    progress_df.loc[idx, 'next_review'] = today + timedelta(days=int(new_interval))
-            else:
-                # 한 번도 틀린 적 없는(=한 번에 정답) 단어는 2개월 뒤 출제
-                progress_df.loc[idx, 'interval'] = 60
-                progress_df.loc[idx, 'next_review'] = _add_months(today, 2)
-
-        else:
-            # 오답이면: 오답노트는 '당일'에만 하고, 다음 출제는 무조건 '내일(1일 뒤)'로
-            progress_df.loc[idx, 'fail_count'] = int(cur_fail) + 1
-            progress_df.loc[idx, 'interval'] = 1
-            progress_df.loc[idx, 'next_review'] = today + timedelta(days=1)
-
-    else:
-        # 신규 단어
-        if is_correct:
-            new_row = {
-                'word_id': word_id,
-                'last_reviewed': today,
-                'next_review': _add_months(today, 2),  # 첫 출제 정답 → 2개월 뒤
-                'interval': 60,
-                'fail_count': 0
-            }
-        else:
-            new_row = {
-                'word_id': word_id,
-                'last_reviewed': today,
-                'next_review': today + timedelta(days=1),  # 오답 → 1일 뒤
-                'interval': 1,
-                'fail_count': 1
-            }
-        progress_df = pd.concat([progress_df, pd.DataFrame([new_row])], ignore_index=True)
-
-    return progress_df
-
-# --- 🔥 [중요] 이름 통일된 레벨 조정 로직 ---
 def adjust_level_based_on_stats():
-    log_files = glob.glob("study_log_*.csv")
-    if not log_files: return 0, "학습 데이터가 없습니다."
-
-    all_logs = pd.DataFrame()
-    for f in log_files:
-        try:
-            temp_df = pd.read_csv(f)
-            if 'username' not in temp_df.columns:
-                user_from_file = f.replace("study_log_", "").replace(".csv", "")
-                temp_df['username'] = user_from_file
-            all_logs = pd.concat([all_logs, temp_df], ignore_index=True)
-        except: continue
-    
-    if all_logs.empty: return 0, "유효한 데이터가 없습니다."
-    if not os.path.exists(DB_FILE_PATTERN): return 0, "DB 파일이 없습니다."
-
-    df = pd.read_csv(DB_FILE_PATTERN, encoding='utf-8-sig')
-    
-    try_counts = all_logs.groupby('word_id')['username'].nunique()
-    wrong_logs = all_logs[all_logs['is_correct'] == 0]
-    wrong_counts = wrong_logs.groupby('word_id')['username'].nunique()
-    
-    updated_count = 0
-    
-    for word_id, user_count in try_counts.items():
-        if word_id in df['id'].values:
-            idx = df[df['id'] == word_id].index[0]
-            wrong_user_count = wrong_counts.get(word_id, 0)
-            
-            df.at[idx, 'total_try'] = user_count
-            df.at[idx, 'total_wrong'] = wrong_user_count
-            
-            wrong_rate = wrong_user_count / user_count if user_count > 0 else 0
-            
-            curr, new_lv = df.at[idx, 'level'], df.at[idx, 'level']
-            
-            # 최소 인원 6명 (테스트 시 1로 변경)
-            if user_count >= 6: 
-                if wrong_rate >= 0.5: new_lv = min(30, curr + 1)
-                elif wrong_rate <= 0.1: new_lv = max(1, curr - 1)
-            
-            if new_lv != curr:
-                df.at[idx, 'level'] = new_lv
-                updated_count += 1
-                
-    df['last_level_update'] = datetime.now().strftime("%Y-%m-%d")
-    df.to_csv(DB_FILE_PATTERN, index=False, encoding='utf-8-sig')
-    return updated_count, "성공적으로 조정되었습니다."
+    return 0, "구글 시트 연동 모드에서는 자동 레벨 조정이 일시 중지됩니다."
