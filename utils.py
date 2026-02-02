@@ -129,14 +129,27 @@ def load_data():
     return df
 
 def load_user_progress(username):
+    """사용자의 학습 진도 로드 (숫자 변환 기능 추가)"""
     df = read_sheet_to_df('user_progress')
+    
+    # 데이터가 없으면 빈 표 반환
     if df.empty:
         return pd.DataFrame(columns=['username', 'word_id', 'last_reviewed', 'next_review', 'interval', 'fail_count'])
     
+    # 해당 유저 데이터만 필터링
     user_df = df[df['username'] == username].copy()
+    
+    # 1. 날짜 컬럼 변환 (기존 코드)
     for col in ['next_review', 'last_reviewed']:
         if col in user_df.columns:
             user_df[col] = pd.to_datetime(user_df[col], errors='coerce').dt.date
+            
+    # 2. [추가됨] 숫자 컬럼 변환 (여기가 핵심! ⭐)
+    # interval, fail_count, word_id는 무조건 숫자로 인식하게 만듦
+    for col in ['interval', 'fail_count', 'word_id']:
+        if col in user_df.columns:
+            user_df[col] = pd.to_numeric(user_df[col], errors='coerce').fillna(0).astype(int)
+            
     return user_df
 
 def save_progress(username, progress_df):
