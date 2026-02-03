@@ -3,5 +3,4 @@ pandas
 gTTS
 altair
 pytz
-gspread
-oauth2client
+tqdm
