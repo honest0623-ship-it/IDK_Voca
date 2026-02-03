@@ -781,155 +781,156 @@ def show_dashboard_page():
                 st.rerun()
 
 def show_quiz_page():
-    username = st.session_state.username
-    df = utils.load_data()
-    if df is None: 
-        st.error("DB 연결 오류")
-        return
+    try:
+        username = st.session_state.username
+        df = utils.load_data()
+        if df is None: 
+            st.error("DB 연결 오류")
+            return
 
-    user_info = utils.get_user_info(username)
-    user_level = int(user_info['level']) if user_info and pd.notna(user_info['level']) else 1
-    
-    # [속도 개선] 세션에 저장된 데이터 사용
-    if 'user_progress_df' not in st.session_state:
-        st.session_state.user_progress_df = utils.load_user_progress(username)
-    progress_df = st.session_state.user_progress_df
-    
-    real_today = utils.get_korea_today()
-    if st.session_state.get('is_tomorrow_mode', False):
-        today = real_today + timedelta(days=1)
-    else:
-        today = real_today
-
-    batch_size = st.session_state.batch_size
-
-    with st.sidebar:
-        if st.button("🏠 홈으로 (대시보드)"):
-            st.session_state.page = 'dashboard'
-            st.rerun()
-        st.divider()
-        st.caption(f"학습 세트: {batch_size}문항")
+        user_info = utils.get_user_info(username)
+        user_level = int(user_info['level']) if user_info and pd.notna(user_info['level']) else 1
+        
+        # [속도 개선] 세션에 저장된 데이터 사용
+        if 'user_progress_df' not in st.session_state:
+            st.session_state.user_progress_df = utils.load_user_progress(username)
+        progress_df = st.session_state.user_progress_df
+        
+        real_today = utils.get_korea_today()
         if st.session_state.get('is_tomorrow_mode', False):
-            st.warning("⚠️ 미래 시점 테스트")
+            today = real_today + timedelta(days=1)
+        else:
+            today = real_today
 
-    # [MOBILE OPTIMIZED] 컬럼 제거하고 컨테이너 사용 (CSS로 중앙 정렬됨)
-    st.markdown("<h2 style='text-align: center;'>🚀 일등급 영어 단어 챌린지</h2>", unsafe_allow_html=True)
-    st.write("")
+        batch_size = st.session_state.batch_size
 
-    if 'full_quiz_list' not in st.session_state:
-        with st.spinner("문제 데이터를 불러오는 중입니다..."):
-                # [NEW] 1. 강제 오답 노트 확인 (Forced Review)
-                pending_wrongs_str = user_info.get('pending_wrongs', '')
-                pending_ids = [int(x) for x in pending_wrongs_str.split(',') if x.strip().isdigit()]
-                
-                # [로컬 상태 초기화]
-                st.session_state.pending_wrongs_local = set(pending_ids)
-                
-                # [NEW] 2. 중단된 세션 확인 (Resume Session)
-                pending_session_str = user_info.get('pending_session', '')
-                session_ids = [int(x) for x in pending_session_str.split(',') if x.strip().isdigit()]
-                
-                # [로컬 상태 초기화]
-                st.session_state.pending_session_local = set(session_ids)
+        with st.sidebar:
+            if st.button("🏠 홈으로 (대시보드)"):
+                st.session_state.page = 'dashboard'
+                st.rerun()
+            st.divider()
+            st.caption(f"학습 세트: {batch_size}문항")
+            if st.session_state.get('is_tomorrow_mode', False):
+                st.warning("⚠️ 미래 시점 테스트")
 
-                if pending_ids:
-                    # 강제 복습 모드 진입
-                    review_q = df[df['id'].isin(pending_ids)].to_dict('records')
-                    random.shuffle(review_q)
-                    
-                    st.session_state.full_quiz_list = review_q
-                    st.session_state.quiz_list = review_q 
-                    st.session_state.current_idx = 0
-                    st.session_state.wrong_answers = []
-                    st.session_state.retry_mode = False
-                    st.session_state.is_first_attempt = True
-                    st.session_state.quiz_state = "answering"
-                    st.session_state.quiz_mode = "forced_review"
-                    
-                    st.warning("⚠️ 지난 학습에서 완료하지 못한 오답이 있습니다. 이를 먼저 해결해야 합니다!")
+        # [MOBILE OPTIMIZED] 컬럼 제거하고 컨테이너 사용 (CSS로 중앙 정렬됨)
+        st.markdown("<h2 style='text-align: center;'>🚀 일등급 영어 단어 챌린지</h2>", unsafe_allow_html=True)
+        st.write("")
 
-                elif session_ids:
-                     # 세션 이어하기 모드
-                    resume_q = df[df['id'].isin(session_ids)].to_dict('records')
-                    # 순서는 섞는 게 학습 효과에 좋음 (또는 저장된 순서 유지? DB엔 집합으로 저장됨 -> 섞자)
-                    random.shuffle(resume_q)
+        if 'full_quiz_list' not in st.session_state:
+            with st.spinner("문제 데이터를 불러오는 중입니다..."):
+                    # [NEW] 1. 강제 오답 노트 확인 (Forced Review)
+                    pending_wrongs_str = user_info.get('pending_wrongs', '')
+                    pending_ids = [int(x) for x in pending_wrongs_str.split(',') if x.strip().isdigit()]
                     
-                    st.session_state.full_quiz_list = resume_q
-                    st.session_state.quiz_list = resume_q
-                    st.session_state.current_idx = 0
-                    st.session_state.wrong_answers = []
-                    st.session_state.retry_mode = False
-                    st.session_state.is_first_attempt = True
-                    st.session_state.quiz_state = "answering"
-                    st.session_state.quiz_mode = "normal"
-                    st.session_state.batch_size = len(resume_q)
+                    # [로컬 상태 초기화]
+                    st.session_state.pending_wrongs_local = set(pending_ids)
                     
-                    st.info(f"🔄 지난 세션을 이어서 진행합니다. ({len(resume_q)}문제 남음)")
+                    # [NEW] 2. 중단된 세션 확인 (Resume Session)
+                    pending_session_str = user_info.get('pending_session', '')
+                    session_ids = [int(x) for x in pending_session_str.split(',') if x.strip().isdigit()]
+                    
+                    # [로컬 상태 초기화]
+                    st.session_state.pending_session_local = set(session_ids)
 
-                else:
-                    # 3. 새로운 학습 세트 생성 (기존 로직)
-                    # 1. 오늘 복습할 단어
-                    today_reviewed = []
-                    if 'last_reviewed' in progress_df.columns:
-                        today_reviewed = progress_df[progress_df['last_reviewed'] == today]['word_id'].tolist()
-                    
-                    review_q = []
-                    if 'next_review' in progress_df.columns:
-                        review_ids = progress_df[
-                            (progress_df['next_review'] <= today) & 
-                            (~progress_df['word_id'].isin(today_reviewed))
-                        ]['word_id'].tolist()
-                        review_q = df[df['id'].isin(review_ids)].to_dict('records')
-                    
-                    # 2. 신규 학습 단어
-                    learned_ids = progress_df['word_id'].tolist() if 'word_id' in progress_df.columns else []
-                    unlearned_df = df[~df['id'].isin(learned_ids)]
-                    
-                    new_q = []
-                    if not unlearned_df.empty:
-                        # 레벨 비율 조정 (현재 레벨 50%, 하위 20%, 상위 30%)
-                        lv_current = unlearned_df[unlearned_df['level'] == user_level]
-                        lv_lower = unlearned_df[unlearned_df['level'] < user_level]
-                        lv_higher = unlearned_df[unlearned_df['level'] > user_level]
+                    if pending_ids:
+                        # 강제 복습 모드 진입
+                        review_q = df[df['id'].isin(pending_ids)].to_dict('records')
+                        random.shuffle(review_q)
                         
-                        needed_new = batch_size 
+                        st.session_state.full_quiz_list = review_q
+                        st.session_state.quiz_list = review_q 
+                        st.session_state.current_idx = 0
+                        st.session_state.wrong_answers = []
+                        st.session_state.retry_mode = False
+                        st.session_state.is_first_attempt = True
+                        st.session_state.quiz_state = "answering"
+                        st.session_state.quiz_mode = "forced_review"
                         
-                        count_current = int(needed_new * 0.5)
-                        count_lower = int(needed_new * 0.2)
-                        count_higher = needed_new - count_current - count_lower
+                        st.warning("⚠️ 지난 학습에서 완료하지 못한 오답이 있습니다. 이를 먼저 해결해야 합니다!")
+
+                    elif session_ids:
+                         # 세션 이어하기 모드
+                        resume_q = df[df['id'].isin(session_ids)].to_dict('records')
+                        # 순서는 섞는 게 학습 효과에 좋음 (또는 저장된 순서 유지? DB엔 집합으로 저장됨 -> 섞자)
+                        random.shuffle(resume_q)
                         
-                        samples_current = lv_current.sample(n=min(len(lv_current), count_current)).to_dict('records')
-                        samples_lower = lv_lower.sample(n=min(len(lv_lower), count_lower)).to_dict('records')
-                        samples_higher = lv_higher.sample(n=min(len(lv_higher), count_higher)).to_dict('records')
+                        st.session_state.full_quiz_list = resume_q
+                        st.session_state.quiz_list = resume_q
+                        st.session_state.current_idx = 0
+                        st.session_state.wrong_answers = []
+                        st.session_state.retry_mode = False
+                        st.session_state.is_first_attempt = True
+                        st.session_state.quiz_state = "answering"
+                        st.session_state.quiz_mode = "normal"
+                        st.session_state.batch_size = len(resume_q)
                         
-                        new_q = samples_current + samples_lower + samples_higher
+                        st.info(f"🔄 지난 세션을 이어서 진행합니다. ({len(resume_q)}문제 남음)")
+
+                    else:
+                        # 3. 새로운 학습 세트 생성 (기존 로직)
+                        # 1. 오늘 복습할 단어
+                        today_reviewed = []
+                        if 'last_reviewed' in progress_df.columns:
+                            today_reviewed = progress_df[progress_df['last_reviewed'] == today]['word_id'].tolist()
                         
-                        # 부족하면 나머지에서 채움
-                        if len(new_q) < needed_new:
-                            remaining_ids = [q['id'] for q in new_q]
-                            rest_df = unlearned_df[~unlearned_df['id'].isin(remaining_ids)]
-                            more_needed = needed_new - len(new_q)
-                            additional_samples = rest_df.sample(n=min(len(rest_df), more_needed)).to_dict('records')
-                            new_q += additional_samples
-                    
-                    random.shuffle(review_q)
-                    random.shuffle(new_q)
-                    combined = review_q + new_q
-                    
-                    # [데이터 안전성] 세션 상태 즉시 저장 -> 로컬 상태 업데이트 + 초기 저장
-                    session_ids_to_save = [q['id'] for q in combined]
-                    st.session_state.pending_session_local = set(session_ids_to_save)
-                    utils.manage_session_state(username, 'set', session_ids_to_save)
-                    
-                    # 퀴즈 리스트 세팅
-                    st.session_state.full_quiz_list = combined
-                    st.session_state.quiz_list = combined[:batch_size]
-                    st.session_state.current_idx = 0
-                    st.session_state.wrong_answers = []
-                    st.session_state.retry_mode = False
-                    st.session_state.is_first_attempt = True
-                    st.session_state.quiz_state = "answering"
-                    st.session_state.quiz_mode = "normal"
+                        review_q = []
+                        if 'next_review' in progress_df.columns:
+                            review_ids = progress_df[
+                                (progress_df['next_review'] <= today) & 
+                                (~progress_df['word_id'].isin(today_reviewed))
+                            ]['word_id'].tolist()
+                            review_q = df[df['id'].isin(review_ids)].to_dict('records')
+                        
+                        # 2. 신규 학습 단어
+                        learned_ids = progress_df['word_id'].tolist() if 'word_id' in progress_df.columns else []
+                        unlearned_df = df[~df['id'].isin(learned_ids)]
+                        
+                        new_q = []
+                        if not unlearned_df.empty:
+                            # 레벨 비율 조정 (현재 레벨 50%, 하위 20%, 상위 30%)
+                            lv_current = unlearned_df[unlearned_df['level'] == user_level]
+                            lv_lower = unlearned_df[unlearned_df['level'] < user_level]
+                            lv_higher = unlearned_df[unlearned_df['level'] > user_level]
+                            
+                            needed_new = batch_size 
+                            
+                            count_current = int(needed_new * 0.5)
+                            count_lower = int(needed_new * 0.2)
+                            count_higher = needed_new - count_current - count_lower
+                            
+                            samples_current = lv_current.sample(n=min(len(lv_current), count_current)).to_dict('records')
+                            samples_lower = lv_lower.sample(n=min(len(lv_lower), count_lower)).to_dict('records')
+                            samples_higher = lv_higher.sample(n=min(len(lv_higher), count_higher)).to_dict('records')
+                            
+                            new_q = samples_current + samples_lower + samples_higher
+                            
+                            # 부족하면 나머지에서 채움
+                            if len(new_q) < needed_new:
+                                remaining_ids = [q['id'] for q in new_q]
+                                rest_df = unlearned_df[~unlearned_df['id'].isin(remaining_ids)]
+                                more_needed = needed_new - len(new_q)
+                                additional_samples = rest_df.sample(n=min(len(rest_df), more_needed)).to_dict('records')
+                                new_q += additional_samples
+                        
+                        random.shuffle(review_q)
+                        random.shuffle(new_q)
+                        combined = review_q + new_q
+                        
+                        # [데이터 안전성] 세션 상태 즉시 저장 -> 로컬 상태 업데이트 + 초기 저장
+                        session_ids_to_save = [q['id'] for q in combined]
+                        st.session_state.pending_session_local = set(session_ids_to_save)
+                        utils.manage_session_state(username, 'set', session_ids_to_save)
+                        
+                        # 퀴즈 리스트 세팅
+                        st.session_state.full_quiz_list = combined
+                        st.session_state.quiz_list = combined[:batch_size]
+                        st.session_state.current_idx = 0
+                        st.session_state.wrong_answers = []
+                        st.session_state.retry_mode = False
+                        st.session_state.is_first_attempt = True
+                        st.session_state.quiz_state = "answering"
+                        st.session_state.quiz_mode = "normal"
 
         if not st.session_state.quiz_list:
              st.info("👏 오늘의 모든 학습을 완료했습니다!")
@@ -985,6 +986,14 @@ def show_quiz_page():
             if st.button("다음 문제 ➡ (Enter)", type="primary", key=f"next_btn_{idx}", use_container_width=True, on_click=go_next_question):
                 pass
             utils.focus_element("button")
+
+    except Exception as e:
+        st.error(f"오류가 발생했습니다: {e}")
+        # import traceback
+        # st.code(traceback.format_exc()) # 디버깅용 상세 로그
+        if st.button("🏠 대시보드로 복구"):
+            st.session_state.page = 'dashboard'
+            st.rerun()
 
 if __name__ == "__main__":
     main()
