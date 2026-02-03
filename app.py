@@ -647,7 +647,17 @@ def show_level_test_page():
             with st.expander("📝 상세 기록 보기"):
                 history_df = pd.DataFrame(st.session_state.test_history)
                 if not history_df.empty:
-                    st.dataframe(history_df[['q_num', 'level', 'word', 'result']], use_container_width=True)
+                    # 결과 이모지 매핑
+                    display_df = history_df.copy()
+                    
+                    def _format_result(val):
+                        if val == 'correct': return "🟢 정답"
+                        elif val == 'wrong': return "❌ 오답"
+                        elif val == 'pass': return "❌ 패스"
+                        return val
+                        
+                    display_df['result'] = display_df['result'].apply(_format_result)
+                    st.dataframe(display_df[['q_num', 'level', 'word', 'result']], use_container_width=True)
         return
 
     # --- 문제 진행 화면 ---
