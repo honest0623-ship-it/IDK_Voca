@@ -32,9 +32,10 @@ SHEET_NAME = "Voca_DB"
 LEVEL_UP_INTERVAL_DAYS = 7
 LEVEL_UP_RATIO = 0.8
 LEVEL_UP_MIN_COUNT = 30
-LEVEL_DOWN_ACCURACY = 0.4
-MIN_TRAIN_DAYS = 3
-MIN_TRAIN_COUNT = 50
+LEVEL_DOWN_ACCURACY = 0.5
+LEVEL_UP_ACCURACY = 0.8
+MIN_TRAIN_DAYS = 0
+MIN_TRAIN_COUNT = 20
 SRS_STEPS_DAYS = [1, 3, 7, 14, 60, 120]
 
 # --- Sheet read cache (TTL + write invalidation) ---
@@ -488,13 +489,140 @@ def get_user_info(username):
     if username in df['username'].values:
         user_row = df[df['username'] == username].iloc[0]
         lv = user_row.get('level', '')
-        if pd.isna(lv) or str(lv).strip() == '':
-            final_lv = None
-        else:
-            try: final_lv = int(lv)
-            except: final_lv = 1
-        return {'level': final_lv, 'name': user_row['name'], 'password': user_row['password']}
+        
+        # Helper to safely get int
+        def _safe_int(val, default):
+            try: return int(float(val))
+            except: return default
+
+        final_lv = _safe_int(lv, 1)
+        
+        # Read new fields
+        fail_streak = _safe_int(user_row.get('fail_streak'), 0)
+        level_shield = _safe_int(user_row.get('level_shield'), 3)
+        qs_count = _safe_int(user_row.get('qs_count'), 0)
+
+        return {
+            'level': final_lv, 
+            'name': user_row['name'], 
+            'password': user_row['password'],
+            'fail_streak': fail_streak,
+            'level_shield': level_shield,
+            'qs_count': qs_count
+        }
     return None
+
+def update_user_dynamic_fields(username, updates):
+    """
+    updates: dict of {'col_name': value}
+    Available cols: level, fail_streak, level_shield, qs_count
+    """
+    for attempt in range(3):
+        try:
+            ws = get_worksheet('users')
+            if not ws: return False
+
+            # 1. 헤더 확인 및 추가
+            headers = ws.row_values(1)
+            header_map = {h: i+1 for i, h in enumerate(headers)}
+            
+            new_headers = []
+            for col in updates.keys():
+                if col not in header_map:
+                    new_headers.append(col)
+            
+            if new_headers:
+                # 헤더 추가
+                ws.update_cell(1, len(headers) + 1, new_headers[0]) # 하나씩 추가 (단순화)
+                # 캐시 무효화 후 재귀 호출로 다시 시도 (헤더 갱신 위해)
+                bump_sheet_cache_ver()
+                if len(new_headers) > 1:
+                     # 여러개면 recursive하게 처리하거나 그냥 루프
+                     pass 
+                return update_user_dynamic_fields(username, updates)
+
+            # 2. 유저 행 찾기
+            cell = ws.find(username, in_column=1)
+            if not cell: return False
+            
+            # 3. 값 업데이트
+            # gspread batch update is better but cell update is simpler for now
+            # We use a list of cells to update for atomicity if possible, but update_cells requires Cell objects
+            # Let's just update one by one for reliability or construct a range
+            
+            cells_to_update = []
+            for col, val in updates.items():
+                col_idx = header_map[col]
+                ws.update_cell(cell.row, col_idx, val)
+                
+            bump_sheet_cache_ver()
+            return True
+
+        except Exception as e:
+            if "429" in str(e):
+                time.sleep(2)
+                continue
+            print(f"Update User Fields Error: {e}")
+            break
+    return False
+
+def evaluate_level_update(current_level, correct_count, total_questions, fail_streak, level_shield, max_level=30):
+    """
+    "방어 구간(Buffer) & 연패 방지" 로직
+    """
+    score_percent = (correct_count / total_questions) * 100
+    change = 0
+    message = ""
+    
+    # Next state defaults
+    next_streak = fail_streak
+    next_shield = level_shield
+
+    # 1. [초고속 승급] 95점 이상 (19~20개) -> 2단계 점프
+    if score_percent >= 95:
+        change = 2
+        next_streak = 0
+        next_shield = 3 # 새 레벨 쉴드 충전
+        message = "완벽해요! 실력이 압도적이라 2단계 승급합니다! 🚀"
+
+    # 2. [승급] 80점 이상 (16~18개) -> 1단계 상승
+    elif score_percent >= 80:
+        change = 1
+        next_streak = 0
+        next_shield = 3 # 새 레벨 쉴드 충전
+        message = "참 잘했어요! 다음 레벨로 올라갑니다. 🎉"
+
+    # 3. [유지] 60점 ~ 79점 (12~15개) -> 현상 유지
+    elif score_percent >= 60:
+        change = 0
+        next_streak = 0 # 중간만 가도 경고 초기화
+        # 쉴드 차감
+        if next_shield > 0:
+            next_shield -= 1
+        message = "수고했어요. 현재 레벨을 유지하며 실력을 다져봅시다."
+
+    # 4. [하향 위기] 60점 미만 (11개 이하)
+    else:
+        change = 0
+        # A. 쉴드 확인
+        if next_shield > 0:
+            next_shield -= 1
+            message = f"아직 적응 기간이에요. 괜찮습니다! (남은 보호 횟수: {next_shield})"
+        else:
+            # B. 연패 체크
+            next_streak += 1
+            if next_streak >= 2:
+                change = -1
+                next_streak = 0
+                next_shield = 3 # 레벨 내려가면 다시 적응 기회 부여
+                message = "너무 어려웠나요? 한 단계 낮춰서 기초를 복습해봐요. ⬇️"
+            else:
+                message = "⚠ 주의! 다음에도 점수가 낮으면 레벨이 내려갈 수 있어요."
+
+    new_level = current_level + change
+    new_level = max(1, min(new_level, max_level))
+    
+    return new_level, next_streak, next_shield, message
 
 def register_user(username, password, name):
     for attempt in range(3):

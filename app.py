@@ -238,62 +238,80 @@ def handle_session_end(username, progress_df, today):
             st.session_state.study_log_buffer = []
 
     # 학습 로그 분석 (구글 시트)
-    study_log_df = utils.load_study_log(username)
-    is_eligible_for_review = False
+    # [NEW] 방어 구간 & 연패 방지 로직 적용
     
-    if not study_log_df.empty:
-        total_days = study_log_df['date'].nunique()
-        total_count = len(study_log_df)
-        if total_days >= utils.MIN_TRAIN_DAYS and total_count >= utils.MIN_TRAIN_COUNT:
-            is_eligible_for_review = True
-            
-    # 레벨 다운/업 제안 로직
-    if df is not None and is_eligible_for_review:
-        # 최근 50문제 정답률 확인
-        recent_logs = study_log_df[study_log_df['level'] <= current_level].tail(50)
-        if len(recent_logs) >= 20:
-            accuracy = recent_logs['is_correct'].mean()
-            if accuracy < utils.LEVEL_DOWN_ACCURACY and current_level > 1:
-                new_level = current_level - 1
-                st.warning("🚧 기초 보강 제안")
-                with st.container(border=True):
-                    st.markdown(f"<h3 style='text-align: center;'>📉 Level Down 제안</h3>", unsafe_allow_html=True)
-                    st.markdown(f"<p style='text-align: center;'>정답률 {accuracy*100:.1f}% 입니다.<br>Level {new_level}로 이동하시겠습니까?</p>", unsafe_allow_html=True)
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        if st.button("✅ 네, 이동", key="btn_down_yes", use_container_width=True):
-                            utils.update_user_level(username, new_level)
-                            st.session_state.page = 'dashboard'
-                            st.rerun()
-                    with c2:
-                        if st.button("❌ 아니오", key="btn_down_no", use_container_width=True):
-                            pass
-                    return
-
-        # 레벨업 조건 확인
-        level_words = df[df['level'] == current_level]
-        total_words = len(level_words)
-        if total_words > 0:
-            level_word_ids = level_words['id'].tolist()
-            mastered_words = progress_df[
-                (progress_df['word_id'].isin(level_word_ids)) & 
-                (progress_df['interval'] >= utils.LEVEL_UP_INTERVAL_DAYS)
-            ]
-            mastered_count = len(mastered_words)
-            target_count = min(total_words * utils.LEVEL_UP_RATIO, utils.LEVEL_UP_MIN_COUNT)
-            
-            if mastered_count >= target_count:
-                new_level = current_level + 1
-                # 다음 레벨 단어가 있는지 확인
-                if not df[df['level'] == new_level].empty:
+    # 1. 현재 세션의 문제 수 확인
+    session_qs_count = len(st.session_state.study_log_buffer) if 'study_log_buffer' in st.session_state else 0
+    
+    # 데이터가 DB에 반영되었으므로 다시 로드 (캐시 무효화됨)
+    study_log_df = utils.load_study_log(username)
+    
+    # 유저 최신 상태 가져오기
+    # 캐시 갱신을 위해 force reload가 필요할 수 있으나, batch_log_study_results에서 bump했으므로 get_user_info도 갱신될 것임
+    # (users 시트는 수정 안했으니 캐시 유지될 수도 있음 -> qs_count 등 읽어야 하므로...)
+    # user_info는 이미 위에서 가져왔지만, 최신 qs_count가 필요함.
+    # 하지만 qs_count는 users 시트에만 있고, study_log 저장 시 users 시트는 안 건드림.
+    # 따라서 기존 user_info 사용해도 무방 (이전 qs_count)
+    
+    current_qs_count = user_info.get('qs_count', 0)
+    fail_streak = user_info.get('fail_streak', 0)
+    level_shield = user_info.get('level_shield', 3)
+    
+    total_qs_accumulated = current_qs_count + session_qs_count
+    
+    if total_qs_accumulated >= 20:
+        # 평가 진행
+        # 최근 20개 로그 가져오기 (현재 레벨)
+        if not study_log_df.empty:
+            current_level_logs = study_log_df[study_log_df['level'] == current_level]
+            if len(current_level_logs) >= 20:
+                target_logs = current_level_logs.tail(20)
+                correct_count = target_logs['is_correct'].sum()
+                total_q = 20 # 고정
+                
+                new_level, new_streak, new_shield, msg = utils.evaluate_level_update(
+                    current_level, correct_count, total_q, fail_streak, level_shield
+                )
+                
+                # 나머지 카운트 (25개 풀었으면 5개 남김)
+                remainder_qs = total_qs_accumulated % 20
+                
+                # DB 업데이트
+                updates = {
+                    'level': new_level,
+                    'fail_streak': new_streak,
+                    'level_shield': new_shield,
+                    'qs_count': remainder_qs
+                }
+                utils.update_user_dynamic_fields(username, updates)
+                
+                # 결과 메시지 출력
+                if new_level != current_level:
                     st.balloons()
                     with st.container(border=True):
-                        st.markdown(f"<h1 style='text-align: center; color: #FFD700;'>🏆 LEVEL UP! 🏆</h1>", unsafe_allow_html=True)
-                        st.markdown(f"<h3 style='text-align: center;'>축하합니다! Level {new_level} 승급!</h3>", unsafe_allow_html=True)
-                        if st.button("🎉 계속하기", key="btn_up_yes", use_container_width=True):
-                            utils.update_user_level(username, new_level)
+                        st.markdown(f"<h1 style='text-align: center; color: #FFD700;'>LEVEL UPDATE</h1>", unsafe_allow_html=True)
+                        st.markdown(f"<h3 style='text-align: center;'>{msg}</h3>", unsafe_allow_html=True)
+                        st.write(f"Level {current_level} ➡ Level {new_level}")
+                        if st.button("확인", key="btn_lv_change", use_container_width=True):
+                            st.session_state.page = 'dashboard'
                             st.rerun()
-                    return
+                    return # 여기서 중단하고 사용자 반응 대기
+                else:
+                    # 레벨 유지 시
+                    st.info(f"📊 레벨 평가 결과: {msg} (다음 평가까지: {20 - remainder_qs}문제)")
+            else:
+                # 로그가 부족한 경우 (혹시 모를 예외)
+                 utils.update_user_dynamic_fields(username, {'qs_count': total_qs_accumulated})
+        else:
+             utils.update_user_dynamic_fields(username, {'qs_count': total_qs_accumulated})
+             
+    else:
+        # 평가 기준 미달 -> 카운트만 누적
+        utils.update_user_dynamic_fields(username, {'qs_count': total_qs_accumulated})
+        st.success(f"📈 레벨 평가 진행 중: {total_qs_accumulated} / 20 문제")
+
+    # 세트 완료 화면
+    batch_size = st.session_state.batch_size
 
     # 세트 완료 화면
     batch_size = st.session_state.batch_size
