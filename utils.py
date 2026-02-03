@@ -677,6 +677,32 @@ def update_schedule(word_id, is_correct, progress_df, today):
     return progress_df
 
 # --- 9. 기타 유틸 ---
+def get_random_question(level, exclude_ids=[]):
+    """지정된 레벨의 랜덤 문제 1개 반환 (중복 방지)"""
+    df = load_data()
+    if df is None or df.empty:
+        return None
+    
+    # 1. 해당 레벨의 단어 필터링
+    candidates = df[df['level'] == level]
+    
+    # 2. 해당 레벨에 단어가 없으면? (데이터 부족 시)
+    # -> 근접 레벨에서 찾기 (±1, ±2...)
+    if candidates.empty:
+        # 전체 데이터에서 exclude_ids 제외
+        candidates = df
+    
+    # 3. 이미 출제된 ID 제외
+    if exclude_ids:
+        candidates = candidates[~candidates['id'].isin(exclude_ids)]
+        
+    if candidates.empty:
+        # 제외할 게 너무 많아서 남은 게 없으면, 그냥 전체에서 랜덤 (중복 허용)
+        candidates = df[df['level'] == level]
+        if candidates.empty: candidates = df # 그래도 없으면 전체
+        
+    return candidates.sample(n=1).iloc[0].to_dict()
+
 def text_to_speech(word_id, text):
     """
     1) 로컬 tts_audio/{word_id}.mp3 확인
