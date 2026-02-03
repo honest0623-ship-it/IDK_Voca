@@ -593,29 +593,52 @@ def update_schedule(word_id, is_correct, progress_df, today):
         return 120
 
     def _calc_next_review(base_date, interval_days: int):
+        if interval_days >= 240: # 8개월 이상
+            return _add_months(base_date, 8)
         if interval_days >= 120:
             return _add_months(base_date, 4)
         if interval_days >= 60:
             return _add_months(base_date, 2)
         return base_date + timedelta(days=int(interval_days))
 
+    JUMP_INTERVAL = 240 # 8개월 (약 240일)
+    RETIRE_DATE = datetime(9999, 12, 31).date()
+
     if 'word_id' in progress_df.columns and word_id in progress_df['word_id'].values:
         idx = progress_df[progress_df['word_id'] == word_id].index[0]
+        
+        # 이전 기록 가져오기 (업데이트 전)
+        prev_last_reviewed = progress_df.loc[idx, 'last_reviewed']
+        cur_interval = _to_int(progress_df.loc[idx, 'interval'], 0)
+        
         progress_df.loc[idx, 'last_reviewed'] = today
         cur_fail = _to_int(progress_df.loc[idx, 'fail_count'], 0)
-        cur_interval = _to_int(progress_df.loc[idx, 'interval'], 0)
 
         if is_correct:
-            if cur_fail > 0:
-                if cur_interval <= 0:
-                    cur_interval = 1
-                new_interval = _next_step(cur_interval)
-                progress_df.loc[idx, 'interval'] = int(new_interval)
-                progress_df.loc[idx, 'next_review'] = _calc_next_review(today, int(new_interval))
+            # 1. 은퇴(졸업) 체크: 이미 8개월(240일) 간격이었던 단어를 맞춤 -> 영구 졸업
+            if cur_interval >= JUMP_INTERVAL:
+                progress_df.loc[idx, 'next_review'] = RETIRE_DATE
+                # interval은 그대로 유지하거나 졸업 코드 부여 (여기선 유지)
             else:
-                # 오답 경험 없는 단어: 첫 정답이면 2개월 뒤
-                progress_df.loc[idx, 'interval'] = 60
-                progress_df.loc[idx, 'next_review'] = _add_months(today, 2)
+                # 2. 8개월 점프 체크: 마지막 리뷰로부터 30일 이상 지났는데 한 번에 맞춤
+                days_since = (today - prev_last_reviewed).days if pd.notna(prev_last_reviewed) else 0
+                
+                if days_since >= 30:
+                    progress_df.loc[idx, 'interval'] = JUMP_INTERVAL
+                    progress_df.loc[idx, 'next_review'] = _add_months(today, 8)
+                else:
+                    # 3. 일반 SRS 로직
+                    if cur_fail > 0:
+                        if cur_interval <= 0:
+                            cur_interval = 1
+                        new_interval = _next_step(cur_interval)
+                        progress_df.loc[idx, 'interval'] = int(new_interval)
+                        progress_df.loc[idx, 'next_review'] = _calc_next_review(today, int(new_interval))
+                    else:
+                        # 오답 경험 없는 단어 (30일 이내 재학습): 기존 로직 유지 (2개월)
+                        # 혹시 interval이 너무 짧다면 조정 가능하나, 기존 로직 따름
+                        progress_df.loc[idx, 'interval'] = 60
+                        progress_df.loc[idx, 'next_review'] = _add_months(today, 2)
         else:
             progress_df.loc[idx, 'fail_count'] = int(cur_fail) + 1
             progress_df.loc[idx, 'interval'] = 1
@@ -623,13 +646,24 @@ def update_schedule(word_id, is_correct, progress_df, today):
 
     else:
         # 신규 단어
-        new_row = {
-            'word_id': int(word_id),
-            'last_reviewed': today,
-            'interval': 60 if is_correct else 1,
-            'fail_count': 0 if is_correct else 1,
-            'next_review': _add_months(today, 2) if is_correct else today + timedelta(days=1)
-        }
+        if is_correct:
+            # 처음 출제된 문제를 한 번에 맞춤 -> 8개월 뒤 출제
+            new_row = {
+                'word_id': int(word_id),
+                'last_reviewed': today,
+                'interval': JUMP_INTERVAL,
+                'fail_count': 0,
+                'next_review': _add_months(today, 8)
+            }
+        else:
+            # 틀림 -> 1일 뒤
+            new_row = {
+                'word_id': int(word_id),
+                'last_reviewed': today,
+                'interval': 1,
+                'fail_count': 1,
+                'next_review': today + timedelta(days=1)
+            }
         progress_df = pd.concat([progress_df, pd.DataFrame([new_row])], ignore_index=True)
 
     # 타입 정리 (안전)
