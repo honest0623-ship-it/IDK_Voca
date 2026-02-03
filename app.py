@@ -70,17 +70,64 @@ def main():
         </style>
     """, unsafe_allow_html=True)
 
-    # [NEW] 새로고침/뒤로가기 방지 경고창 (Javascript Injection)
+    # [NEW] 새로고침/뒤로가기 방지 및 하단 버튼 강제 제거 스크립트
     components.html("""
         <script>
+            // 1. 뒤로가기 방지
             try {
                 window.parent.addEventListener('beforeunload', function (e) {
                     e.preventDefault();
-                    e.returnValue = ''; // Chrome 등 최신 브라우저 필수 설정
+                    e.returnValue = ''; 
                 });
             } catch (err) {
                 console.log("Prevention Script Error: " + err);
             }
+
+            // 2. [Mobile Fix] Streamlit Cloud UI 강제 제거 (0.3초마다 실행)
+            function killStreamlitUI() {
+                try {
+                    // (1) 텍스트/링크 기반 제거
+                    const anchors = window.parent.document.querySelectorAll('a');
+                    anchors.forEach(a => {
+                        if (a.href.includes('streamlit.io')) {
+                            a.style.display = 'none';
+                            a.style.visibility = 'hidden';
+                        }
+                    });
+
+                    // (2) 클래스/ID 기반 제거
+                    const targets = [
+                        '.stAppDeployButton', 
+                        '[data-testid="stHeader"]', 
+                        '[data-testid="stToolbar"]', 
+                        '[data-testid="manage-app-button"]',
+                        'div[class*="viewerBadge"]',
+                        'button[kind="header"]'
+                    ];
+                    
+                    targets.forEach(selector => {
+                        const elements = window.parent.document.querySelectorAll(selector);
+                        elements.forEach(el => {
+                            el.style.display = 'none';
+                            el.style.visibility = 'hidden';
+                        });
+                    });
+                    
+                    // (3) 현재 문서(iframe 내부)에서도 한번 더 수행
+                    targets.forEach(selector => {
+                        const elements = document.querySelectorAll(selector);
+                        elements.forEach(el => {
+                            el.style.display = 'none';
+                            el.style.visibility = 'hidden';
+                        });
+                    });
+
+                } catch (e) {
+                    console.log("UI Cleaner Error: " + e);
+                }
+            }
+            
+            setInterval(killStreamlitUI, 300);
         </script>
     """, height=0)
     
