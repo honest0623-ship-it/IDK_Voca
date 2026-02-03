@@ -36,6 +36,11 @@ def main():
             html, body {
                 overscroll-behavior-y: contain !important;
             }
+            /* [NEW] Streamlit 기본 Footer 및 햄버거 메뉴 숨기기 */
+            footer {visibility: hidden;}
+            #MainMenu {visibility: hidden;}
+            header {visibility: hidden;}
+            .stApp > footer { display: none; }
         </style>
     """, unsafe_allow_html=True)
 
