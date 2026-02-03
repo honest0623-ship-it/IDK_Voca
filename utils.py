@@ -380,7 +380,7 @@ def get_user_info(username):
         else:
             try: final_lv = int(lv)
             except: final_lv = 1
-        return {'level': final_lv, 'name': user_row['name']}
+        return {'level': final_lv, 'name': user_row['name'], 'password': user_row['password']}
     return None
 
 def register_user(username, password, name):
