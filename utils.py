@@ -944,9 +944,27 @@ def get_highlighted_sentence(sentence, target_word):
     return pattern.sub(r"<span style='color: #E74C3C; font-weight: 900; font-size: 1.2em;'>\g<0></span>", sentence)
 
 def focus_element(target_type="input"):
-    # [안정화] JS 주입으로 인한 렌더링 충돌 방지를 위해 임시 비활성화
-    pass
-    # components.html(...) 
+    """
+    JS를 이용해 지정된 요소(input 또는 button)에 포커스를 강제로 위치시킴.
+    """
+    components.html(
+        f"""
+        <script>
+            try {{
+                setTimeout(function() {{
+                    var targets = window.parent.document.querySelectorAll('{ "input[type=text]" if target_type == "input" else "button" }');
+                    if (targets.length > 0) {{
+                        // 가장 마지막 요소에 포커스 (보통 현재 활성화된 컴포넌트)
+                        targets[targets.length - 1].focus();
+                    }}
+                }}, 300);
+            }} catch(e) {{
+                console.log("Focus Error: " + e);
+            }}
+        </script>
+        """,
+        height=0
+    ) 
 
 
 def adjust_level_based_on_stats():

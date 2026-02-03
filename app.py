@@ -102,6 +102,11 @@ def check_answer_callback(username, curr_q, target, today):
             
             if st.session_state.is_first_attempt and st.session_state.get("quiz_mode") == "normal":
                 st.session_state.user_progress_df = utils.update_schedule(curr_q['id'], True, st.session_state.user_progress_df, today)
+            
+            # [FIX] 오답 후 정답 맞췄을 때 오답 노트에서 제거 (재시도 성공 시에도 제거되어야 함)
+            if 'pending_wrongs_local' in st.session_state and curr_q['id'] in st.session_state.pending_wrongs_local:
+                st.session_state.pending_wrongs_local.remove(curr_q['id'])
+                
             st.session_state.quiz_state = "success"
         else:
             if st.session_state.is_first_attempt:
