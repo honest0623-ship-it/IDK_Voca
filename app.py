@@ -44,6 +44,17 @@ def main():
             [data-testid="stToolbar"] {visibility: hidden; display: none !important;}
             .stApp > header {display: none !important;}
             .stApp > footer { display: none !important; }
+            
+            /* [NEW] Streamlit Cloud 전용 요소 숨기기 (Manage App 버튼 등) */
+            .stAppDeployButton { display: none !important; }
+            [data-testid="stDecoration"] { display: none !important; }
+            [data-testid="stStatusWidget"] { display: none !important; }
+            /* 하단 고정 링크 (Made with Streamlit 등) 타겟팅 */
+            a[href*="streamlit.io"] { display: none !important; }
+            a[href*="share.streamlit.io"] { display: none !important; }
+            button[kind="header"] { display: none !important; }
+            .viewerBadge_container__1QSob { display: none !important; }
+            .styles_viewerBadge__1yB5_ { display: none !important; }
         </style>
     """, unsafe_allow_html=True)
 
