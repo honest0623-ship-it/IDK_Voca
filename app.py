@@ -49,12 +49,24 @@ def main():
             .stAppDeployButton { display: none !important; }
             [data-testid="stDecoration"] { display: none !important; }
             [data-testid="stStatusWidget"] { display: none !important; }
+            
             /* 하단 고정 링크 (Made with Streamlit 등) 타겟팅 */
             a[href*="streamlit.io"] { display: none !important; }
             a[href*="share.streamlit.io"] { display: none !important; }
             button[kind="header"] { display: none !important; }
             .viewerBadge_container__1QSob { display: none !important; }
             .styles_viewerBadge__1yB5_ { display: none !important; }
+            
+            /* [STRONG] 하단 고정 요소 강제 숨김 (우측 하단 아이콘들) */
+            div[style*="position: fixed"][style*="bottom:"] { display: none !important; }
+            #root > div:nth-child(1) > div > div > div > div > section[data-testid="stSidebar"] > div > div:nth-child(2) { display: none !important; }
+            
+            /* Streamlit Cloud Toolbar & Footer Kill List */
+            [data-testid="manage-app-button"] { display: none !important; }
+            div[class*="st-emotion-cache"] { z-index: 0; } /* 본문이 위로 오도록 */
+            
+            /* iframe으로 삽입되는 외부 요소들(혹시 모를) 숨김 시도 */
+            iframe[title="streamlit-footer"] { display: none !important; }
         </style>
     """, unsafe_allow_html=True)
 
