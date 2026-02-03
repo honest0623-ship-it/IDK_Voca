@@ -37,10 +37,13 @@ def main():
                 overscroll-behavior-y: contain !important;
             }
             /* [NEW] Streamlit 기본 Footer 및 햄버거 메뉴 숨기기 */
-            footer {visibility: hidden;}
-            #MainMenu {visibility: hidden;}
-            header {visibility: hidden;}
-            .stApp > footer { display: none; }
+            footer {visibility: hidden; display: none !important;}
+            #MainMenu {visibility: hidden; display: none !important;}
+            header {visibility: hidden; display: none !important;}
+            [data-testid="stHeader"] {visibility: hidden; display: none !important;}
+            [data-testid="stToolbar"] {visibility: hidden; display: none !important;}
+            .stApp > header {display: none !important;}
+            .stApp > footer { display: none !important; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -516,6 +519,9 @@ def show_login_page():
                     else:
                         st.error("비밀번호 오류")
 
+    # [MOBILE KEYBOARD FIX] 하단 여백 추가 (키보드가 올라왔을 때 스크롤 가능하도록)
+    st.markdown("<div style='height: 40vh;'></div>", unsafe_allow_html=True)
+
 def show_admin_page():
     st.title("👨‍🏫 선생님 관리 대시보드 (DB 연동됨)")
     
@@ -746,56 +752,6 @@ def show_dashboard_page():
     progress_df = utils.load_user_progress(username)
     real_today = utils.get_korea_today()
 
-    with st.sidebar:
-        st.title(f"👤 {realname}")
-        st.subheader(f"LEVEL {user_level}")
-        st.divider()
-        
-        if st.button("🔄 레벨 테스트 다시 보기", use_container_width=True):
-            keys_to_delete = ['test_questions', 'test_idx', 'test_score', 'test_results', 'last_test_feedback', 'level_test_state']
-            for k in keys_to_delete:
-                if k in st.session_state: del st.session_state[k]
-            st.session_state.is_level_testing = True
-            st.rerun()
-        
-        st.caption("⚠️ 주의: 결과에 따라 새로운 레벨이 부여됩니다.")
-
-        st.divider()
-        with st.expander("🔐 비밀번호 변경"):
-            with st.form("change_pw_form"):
-                current_pw = st.text_input("현재 비밀번호", type="password")
-                new_pw = st.text_input("새 비밀번호", type="password")
-                confirm_pw = st.text_input("새 비밀번호 확인", type="password")
-                
-                if st.form_submit_button("변경하기"):
-                    if new_pw != confirm_pw:
-                        st.error("새 비밀번호가 일치하지 않습니다.")
-                    elif not new_pw:
-                        st.error("비밀번호를 입력하세요.")
-                    else:
-                        user_info = utils.get_user_info(username)
-                        if user_info and utils.check_hashes(current_pw, user_info['password']):
-                            if utils.reset_user_password(username, new_pw):
-                                st.success("변경 완료! 다시 로그인하세요.")
-                                time.sleep(1.5)
-                                st.session_state.logged_in = False
-                                st.session_state.page = 'login'
-                                st.rerun()
-                            else:
-                                st.error("변경 실패 (시스템 오류)")
-                        else:
-                            st.error("현재 비밀번호가 틀렸습니다.")
-            
-        st.write("")
-        if st.button("로그아웃", use_container_width=True):
-            st.session_state.logged_in = False
-            st.session_state.page = 'login'
-            if 'signup_success' in st.session_state: del st.session_state['signup_success']
-            # 세션 초기화
-            for k in list(st.session_state.keys()):
-                if k not in ['logged_in', 'page']: del st.session_state[k]
-            st.rerun()
-
     # [MOBILE OPTIMIZED] 메인 컬럼 제거
     st.markdown(f"<h1 style='text-align: center;'>👋 안녕하세요.<br>{realname} 학생!</h1>", unsafe_allow_html=True)
     st.markdown(f"<h4 style='text-align: center; color: #4e8cff;'>현재 레벨: Lv.{user_level}</h4>", unsafe_allow_html=True)
@@ -837,6 +793,52 @@ def show_dashboard_page():
                     if k in st.session_state: del st.session_state[k]
                 st.session_state.page = 'quiz'
                 st.rerun()
+
+    st.divider()
+    with st.expander("⚙️ 계정 및 설정 관리"):
+        if st.button("🔄 레벨 테스트 다시 보기", use_container_width=True):
+            keys_to_delete = ['test_questions', 'test_idx', 'test_score', 'test_results', 'last_test_feedback', 'level_test_state']
+            for k in keys_to_delete:
+                if k in st.session_state: del st.session_state[k]
+            st.session_state.is_level_testing = True
+            st.rerun()
+        st.caption("⚠️ 주의: 결과에 따라 새로운 레벨이 부여됩니다.")
+        
+        st.write("---")
+        st.subheader("🔐 비밀번호 변경")
+        with st.form("change_pw_form"):
+            current_pw = st.text_input("현재 비밀번호", type="password")
+            new_pw = st.text_input("새 비밀번호", type="password")
+            confirm_pw = st.text_input("새 비밀번호 확인", type="password")
+            
+            if st.form_submit_button("변경하기"):
+                if new_pw != confirm_pw:
+                    st.error("새 비밀번호가 일치하지 않습니다.")
+                elif not new_pw:
+                    st.error("비밀번호를 입력하세요.")
+                else:
+                    user_info = utils.get_user_info(username)
+                    if user_info and utils.check_hashes(current_pw, user_info['password']):
+                        if utils.reset_user_password(username, new_pw):
+                            st.success("변경 완료! 다시 로그인하세요.")
+                            time.sleep(1.5)
+                            st.session_state.logged_in = False
+                            st.session_state.page = 'login'
+                            st.rerun()
+                        else:
+                            st.error("변경 실패 (시스템 오류)")
+                    else:
+                        st.error("현재 비밀번호가 틀렸습니다.")
+        
+        st.write("---")
+        if st.button("🚪 로그아웃", type="secondary", use_container_width=True):
+            st.session_state.logged_in = False
+            st.session_state.page = 'login'
+            if 'signup_success' in st.session_state: del st.session_state['signup_success']
+            # 세션 초기화
+            for k in list(st.session_state.keys()):
+                if k not in ['logged_in', 'page']: del st.session_state[k]
+            st.rerun()
 
 def show_quiz_page():
     try:
