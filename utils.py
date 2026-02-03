@@ -678,28 +678,31 @@ def update_schedule(word_id, is_correct, progress_df, today):
 
 # --- 9. 기타 유틸 ---
 def get_random_question(level, exclude_ids=[]):
-    """지정된 레벨의 랜덤 문제 1개 반환 (중복 방지)"""
+    """지정된 레벨의 랜덤 문제 1개 반환 (없으면 근접 레벨 탐색)"""
     df = load_data()
     if df is None or df.empty:
         return None
     
-    # 1. 해당 레벨의 단어 필터링
-    candidates = df[df['level'] == level]
-    
-    # 2. 해당 레벨에 단어가 없으면? (데이터 부족 시)
-    # -> 근접 레벨에서 찾기 (±1, ±2...)
-    if candidates.empty:
-        # 전체 데이터에서 exclude_ids 제외
-        candidates = df
-    
-    # 3. 이미 출제된 ID 제외
+    # 1. 해당 레벨의 단어 필터링 (exclude_ids 제외)
+    base_pool = df
     if exclude_ids:
-        candidates = candidates[~candidates['id'].isin(exclude_ids)]
-        
+        base_pool = df[~df['id'].isin(exclude_ids)]
+        if base_pool.empty: base_pool = df # 제외 후 없으면 전체에서 (중복 허용)
+
+    candidates = base_pool[base_pool['level'] == level]
+    
+    # 2. 해당 레벨에 단어가 없으면 -> 가장 가까운 레벨 찾기
     if candidates.empty:
-        # 제외할 게 너무 많아서 남은 게 없으면, 그냥 전체에서 랜덤 (중복 허용)
-        candidates = df[df['level'] == level]
-        if candidates.empty: candidates = df # 그래도 없으면 전체
+        available_levels = base_pool['level'].unique()
+        if len(available_levels) > 0:
+            # 현재 level과 차이가 가장 적은 레벨 찾기
+            nearest_level = min(available_levels, key=lambda x: abs(x - level))
+            candidates = base_pool[base_pool['level'] == nearest_level]
+        else:
+            candidates = base_pool # 정말 데이터가 없는 경우
+
+    if candidates.empty:
+        return None
         
     return candidates.sample(n=1).iloc[0].to_dict()
 
