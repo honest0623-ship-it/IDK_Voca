@@ -26,35 +26,11 @@ def main():
                 padding: 15px;
                 border-radius: 10px;
                 text-align: center;
-                font-size: 1.2em !important; /* 모바일 대응 조정 */
+                font-size: 1.2em !important;
                 margin-bottom: 15px;
                 color: #31333F;
                 font-weight: 500;
                 line-height: 1.5;
-            }
-            
-            /* [NEW] 모바일 최적화 CSS */
-            /* 전체 컨테이너 패딩 축소 */
-            .block-container {
-                padding-top: 1rem !important;
-                padding-bottom: 2rem !important;
-                padding-left: 1rem !important;
-                padding-right: 1rem !important;
-                max-width: 800px !important; /* PC에서도 너무 넓지 않게 */
-                margin: 0 auto !important;
-            }
-            
-            /* 헤더 크기 조정 */
-            h1 { font-size: 1.8rem !important; }
-            h2 { font-size: 1.5rem !important; }
-            h3 { font-size: 1.3rem !important; }
-            p, div { font-size: 1rem; }
-
-            /* 모바일 전용 미디어 쿼리 */
-            @media (max-width: 600px) {
-                h1 { font-size: 1.5rem !important; }
-                .success-sentence-box { font-size: 1.1em !important; padding: 10px; }
-                .stButton button { width: 100% !important; } /* 버튼 꽉 차게 */
             }
         </style>
     """, unsafe_allow_html=True)
