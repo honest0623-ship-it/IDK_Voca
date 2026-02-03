@@ -288,7 +288,9 @@ def show_login_page():
                 new_password_confirm = st.text_input("비밀번호 확인", type='password')
                 
                 if st.button("가입하기", use_container_width=True):
-                    if input_code != utils.SIGNUP_SECRET_CODE:
+                    # 시스템 설정 로드
+                    config = utils.get_system_config()
+                    if input_code != config.get('signup_code', ''):
                         st.error("❌ 가입 인증 코드가 틀렸습니다.")
                     elif new_password != new_password_confirm:
                         st.error("❌ 비밀번호가 다릅니다.")
@@ -316,7 +318,8 @@ def show_login_page():
                 st.subheader("관리자 로그인")
                 admin_pw = st.text_input("비밀번호", type="password", key="side_admin_pw")
                 if st.button("접속", key="btn_side_admin"):
-                    if admin_pw == utils.ADMIN_PASSWORD:
+                    config = utils.get_system_config()
+                    if admin_pw == config.get('admin_pw', ''):
                         st.session_state.page = 'admin'
                         st.session_state.show_admin_login = False
                         st.rerun()
@@ -393,8 +396,36 @@ def show_admin_page():
             st.info(f"결과: {msg}")
 
     with tab4:
-        st.subheader("⚙️ 시스템 테스트 설정")
-        st.warning("⚠️ 이 설정은 테스트 목적으로만 사용하세요.")
+        st.subheader("⚙️ 시스템 보안 설정")
+        
+        # 설정 로드
+        config = utils.get_system_config()
+        
+        with st.container(border=True):
+            st.markdown("#### 🔐 보안 코드 관리")
+            st.info("여기서 변경하면 즉시 반영됩니다.")
+            
+            with st.form("admin_config_form"):
+                new_signup_code = st.text_input("학원생 가입 인증 코드", value=config.get('signup_code', ''))
+                new_admin_pw = st.text_input("관리자 비밀번호", value=config.get('admin_pw', ''), type='password')
+                
+                if st.form_submit_button("💾 설정 저장하기", type="primary"):
+                    if not new_signup_code or not new_admin_pw:
+                        st.warning("값을 입력해주세요.")
+                    else:
+                        s1 = utils.update_system_config('signup_code', new_signup_code)
+                        s2 = utils.update_system_config('admin_pw', new_admin_pw)
+                        
+                        if s1 and s2:
+                            st.success("✅ 설정이 안전하게 저장되었습니다.")
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error("❌ 저장 실패 (네트워크 오류)")
+
+        st.divider()
+        st.subheader("🧪 시스템 테스트 설정")
+        st.caption("테스트 목적으로만 사용하세요.")
         
         current_state = st.session_state.get('is_tomorrow_mode', False)
         is_tomorrow = st.checkbox("시간 여행 모드 (내일 날짜로 인식)", value=current_state)

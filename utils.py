@@ -35,8 +35,6 @@ LEVEL_UP_MIN_COUNT = 30
 LEVEL_DOWN_ACCURACY = 0.4
 MIN_TRAIN_DAYS = 3
 MIN_TRAIN_COUNT = 50
-SIGNUP_SECRET_CODE = st.secrets.get("SIGNUP_SECRET_CODE", "math2026")
-ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "teacher1234")
 SRS_STEPS_DAYS = [1, 3, 7, 14, 60, 120]
 
 # --- Sheet read cache (TTL + write invalidation) ---
@@ -117,14 +115,91 @@ def _read_sheet_to_df_uncached(tab_name):
             return pd.DataFrame()
     return pd.DataFrame()
 
-# --- 4. 보안 및 시간 함수 ---
-
 def read_sheet_to_df(tab_name, use_cache: bool = True):
     """데이터 읽기 (기본: 90초 캐시). 쓰기 후 bump_sheet_cache_ver()로 무효화."""
     if use_cache:
         return _read_sheet_to_df_cached(str(tab_name), _get_sheet_cache_ver())
     return _read_sheet_to_df_uncached(tab_name)
 
+# --- [NEW] 시스템 설정 관리 (Config) ---
+@st.cache_data(ttl=60)
+def get_system_config():
+    """
+    구글 시트 'config' 탭에서 설정을 읽어옴.
+    없으면 탭을 생성하고 기본값 저장.
+    반환: {'signup_code': '...', 'admin_pw': '...'}
+    """
+    default_config = {
+        'signup_code': '',
+        'admin_pw': ''
+    }
+    
+    # 1. 시트 읽기
+    df = read_sheet_to_df('config', use_cache=False)
+    
+    # 2. 데이터가 없으면 초기화
+    if df.empty or 'key' not in df.columns:
+        init_config_sheet(default_config)
+        return default_config
+    
+    # 3. 딕셔너리로 변환
+    config_dict = {}
+    try:
+        for _, row in df.iterrows():
+            config_dict[row['key']] = row['value']
+    except:
+        return default_config
+        
+    # 필수 키가 없으면 기본값 병합
+    for k, v in default_config.items():
+        if k not in config_dict:
+            config_dict[k] = v
+            
+    return config_dict
+
+def init_config_sheet(default_config):
+    """config 시트 초기화"""
+    try:
+        sh = _get_spreadsheet()
+        try:
+            ws = sh.worksheet('config')
+            ws.clear()
+        except:
+            ws = sh.add_worksheet(title='config', rows=20, cols=2)
+            
+        # 헤더 및 기본 데이터 쓰기
+        data = [['key', 'value']]
+        for k, v in default_config.items():
+            data.append([k, v])
+        ws.update(data)
+    except Exception as e:
+        print(f"Config Init Error: {e}")
+
+def update_system_config(key, new_value):
+    """설정값 업데이트 (시트 전체 갱신 방식)"""
+    current = get_system_config()
+    current[key] = new_value
+    
+    try:
+        sh = _get_spreadsheet()
+        try:
+            ws = sh.worksheet('config')
+        except:
+            ws = sh.add_worksheet(title='config', rows=20, cols=2)
+        
+        ws.clear()
+        data = [['key', 'value']]
+        for k, v in current.items():
+            data.append([k, v])
+        ws.update(data)
+        
+        st.cache_data.clear() # 캐시 초기화
+        return True
+    except Exception as e:
+        st.error(f"설정 저장 실패: {e}")
+        return False
+
+# --- 4. 보안 및 시간 함수 ---
 def make_hashes(password):
     return hashlib.sha256(str.encode(password)).hexdigest()
 
@@ -207,7 +282,7 @@ def save_progress(username, progress_df):
             progress_df['last_reviewed'] = progress_df['last_reviewed'].astype(str)
             progress_df['next_review'] = progress_df['next_review'].astype(str)
 
-            all_data = ws.get_all_values() # 값만 가져오기 (가벼움)
+            all_data = ws.get_all_values() # 값만 가져오기 (가벼움) 
             
             if len(all_data) > 1:
                 headers = all_data[0]
@@ -368,6 +443,44 @@ def load_study_log(username):
     df['is_correct'] = df['is_correct'].fillna(0).astype(int)
 
     return df
+
+def get_all_study_logs():
+    """모든 학습 로그 로드 (관리자용 - 전체 유저)"""
+    df = read_sheet_to_df('study_log')
+    if df.empty:
+        return pd.DataFrame()
+
+    # 컬럼 보정
+    for col in ['timestamp', 'date', 'word_id', 'username', 'level', 'is_correct']:
+        if col not in df.columns:
+            df[col] = None
+
+    # 날짜 및 숫자 변환
+    df['date'] = pd.to_datetime(df['date'], errors='coerce').dt.date
+    df['word_id'] = pd.to_numeric(df['word_id'], errors='coerce')
+    df['level'] = pd.to_numeric(df['level'], errors='coerce')
+    df['is_correct'] = pd.to_numeric(df['is_correct'], errors='coerce')
+
+    df = df.dropna(subset=['date'])
+    df['word_id'] = df['word_id'].fillna(0).astype(int)
+    df['level'] = df['level'].fillna(0).astype(int)
+    df['is_correct'] = df['is_correct'].fillna(0).astype(int)
+
+    return df
+
+def get_all_users():
+    """모든 사용자 정보 로드 (관리자용)"""
+    df = read_sheet_to_df('users')
+    if df.empty:
+        return pd.DataFrame(columns=['username', 'name', 'level'])
+    
+    # 필수 컬럼 보장
+    for col in ['username', 'name', 'level']:
+        if col not in df.columns:
+            df[col] = ''
+            
+    return df
+
 def get_user_info(username):
     df = read_sheet_to_df('users')
     if df.empty: return None
