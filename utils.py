@@ -321,7 +321,7 @@ def log_study_result(username, word_id, level, is_correct):
             break
 
 
-def log_study_results_batch(rows):
+def batch_log_study_results(rows):
     """학습 로그를 여러 행 한 번에 append (속도 개선)"""
     if not rows:
         return
