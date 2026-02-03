@@ -501,6 +501,8 @@ def get_user_info(username):
         fail_streak = _safe_int(user_row.get('fail_streak'), 0)
         level_shield = _safe_int(user_row.get('level_shield'), 3)
         qs_count = _safe_int(user_row.get('qs_count'), 0)
+        pending_wrongs = str(user_row.get('pending_wrongs', ''))
+        pending_session = str(user_row.get('pending_session', ''))
 
         return {
             'level': final_lv, 
@@ -508,9 +510,63 @@ def get_user_info(username):
             'password': user_row['password'],
             'fail_streak': fail_streak,
             'level_shield': level_shield,
-            'qs_count': qs_count
+            'qs_count': qs_count,
+            'pending_wrongs': pending_wrongs,
+            'pending_session': pending_session
         }
     return None
+
+def manage_session_state(username, action, data):
+    """
+    진행 중인 세션(pending_session) 관리
+    action: 'set' (list of ids) or 'remove' (single id)
+    """
+    if action == 'set':
+        # data expected to be list of ints or strings
+        new_str = ",".join(str(x) for x in data)
+        update_user_dynamic_fields(username, {'pending_session': new_str})
+        
+    elif action == 'remove':
+        # data expected to be single id
+        user_info = get_user_info(username)
+        if not user_info: return
+        
+        current_str = user_info.get('pending_session', '')
+        current_ids = [x.strip() for x in current_str.split(',') if x.strip()]
+        str_id = str(data)
+        
+        if str_id in current_ids:
+            current_ids.remove(str_id)
+            new_str = ",".join(current_ids)
+            update_user_dynamic_fields(username, {'pending_session': new_str})
+
+def manage_pending_wrongs(username, action, word_id):
+    """
+    오답노트(pending_wrongs) 관리
+    action: 'add' or 'remove'
+    """
+    # 1. 현재 상태 가져오기
+    user_info = get_user_info(username)
+    if not user_info: return
+    
+    current_str = user_info.get('pending_wrongs', '')
+    current_ids = [x.strip() for x in current_str.split(',') if x.strip()]
+    
+    str_id = str(word_id)
+    changed = False
+    
+    if action == 'add':
+        if str_id not in current_ids:
+            current_ids.append(str_id)
+            changed = True
+    elif action == 'remove':
+        if str_id in current_ids:
+            current_ids.remove(str_id)
+            changed = True
+            
+    if changed:
+        new_str = ",".join(current_ids)
+        update_user_dynamic_fields(username, {'pending_wrongs': new_str})
 
 def update_user_dynamic_fields(username, updates):
     """
@@ -896,4 +952,110 @@ def focus_element(target_type="input"):
     )
 
 def adjust_level_based_on_stats():
-    return 0, "구글 시트 연동 모드에서는 자동 레벨 조정이 일시 중지됩니다."
+    """
+    단어 난이도 자동 조정 (Weighted Gap Algorithm)
+    - 학생 레벨과 단어 레벨의 차이를 가중치로 사용
+    - 고레벨 학생이 틀리면 단어 레벨 상승 (강력)
+    - 저레벨 학생이 맞추면 단어 레벨 하락 (강력)
+    """
+    try:
+        logs_df = get_all_study_logs()
+        words_df = load_data()
+        
+        if logs_df.empty or words_df is None:
+            return 0, "데이터가 부족합니다."
+
+        # 단어별 현재 레벨 매핑
+        word_levels = dict(zip(words_df['id'], words_df['level']))
+        
+        # 조정 점수 계산
+        adjustment_scores = {} # word_id -> score
+        
+        # 로그 분석 (최근 1000건 정도만? 아니면 전체? 일단 전체 하되 데이터 많으면 최적화 필요)
+        # 여기선 전체 분석
+        for _, row in logs_df.iterrows():
+            word_id = row['word_id']
+            user_lv = row['level'] # 로그 당시 유저 레벨 (이걸 써야 정확함. 현재 유저 레벨보다 기록 당시 상황이 중요)
+            is_correct = row['is_correct']
+            
+            if word_id not in word_levels: continue
+            
+            cur_word_lv = word_levels[word_id]
+            gap = user_lv - cur_word_lv
+            
+            score = 0
+            if is_correct:
+                if gap < 0: # 저레벨 학생이 맞춤 (쉬움)
+                    score = -abs(gap) * 2.0
+                elif gap == 0:
+                    score = -0.5
+                # gap > 0 (고레벨이 맞춤) -> 당연함 (변동 없음)
+            else:
+                if gap > 0: # 고레벨 학생이 틀림 (어려움)
+                    score = abs(gap) * 2.0
+                elif gap == 0:
+                    score = 0.5
+                # gap < 0 (저레벨이 틀림) -> 당연함 (변동 없음)
+                
+            adjustment_scores[word_id] = adjustment_scores.get(word_id, 0) + score
+
+        # 변경 대상 선별 (Threshold: +/- 15점)
+        THRESHOLD = 15
+        updates = []
+        
+        for word_id, score in adjustment_scores.items():
+            current_lv = word_levels[word_id]
+            new_lv = current_lv
+            
+            if score >= THRESHOLD:
+                new_lv += 1
+            elif score <= -THRESHOLD:
+                new_lv -= 1
+                
+            # 범위 제한 (1~30)
+            new_lv = max(1, min(30, new_lv))
+            
+            if new_lv != current_lv:
+                updates.append((new_lv, word_id))
+        
+        # DB 업데이트
+        if updates:
+            ws = get_worksheet('voca_db')
+            if not ws: return 0, "DB 연결 실패"
+            
+            # Batch Update가 효율적이나, gspread cell 찾기 로직이 필요.
+            # 여기서는 안전하게 하나씩 업데이트하거나, 전체 데이터를 다시 쓰는 방식 고려.
+            # voca_db는 크기가 클 수 있으므로, 변경된 것만 cell update 권장.
+            # 하지만 find 호출이 많으면 느림. -> 전체 다시 쓰기가 나을 수도 있음 (데이터 1000개 미만이면).
+            # 일단 안전하게 cell update 시도 (개수가 적을 것으로 예상).
+            
+            count = 0
+            # 성능을 위해 전체 데이터를 로드해서 메모리에서 수정 후 덮어쓰기 (가장 확실)
+            all_data = ws.get_all_values()
+            headers = all_data[0]
+            id_idx = headers.index('id')
+            lv_idx = headers.index('level')
+            
+            id_map = {int(row[id_idx]): i for i, row in enumerate(all_data) if i > 0 and row[id_idx].isdigit()}
+            
+            changed = False
+            for new_lv, w_id in updates:
+                if w_id in id_map:
+                    row_idx = id_map[w_id]
+                    all_data[row_idx][lv_idx] = str(new_lv)
+                    changed = True
+                    count += 1
+            
+            if changed:
+                ws.update(all_data)
+                bump_sheet_cache_ver()
+                st.cache_data.clear() # 데이터 갱신
+                return count, f"{count}개 단어의 난이도가 재조정되었습니다."
+            else:
+                return 0, "조정 대상이 없습니다."
+                
+        return 0, "조정 대상이 없습니다."
+
+    except Exception as e:
+        print(f"Level Adjust Error: {e}")
+        return 0, f"오류 발생: {e}"
