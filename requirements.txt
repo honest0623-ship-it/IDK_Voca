@@ -4,3 +4,5 @@ gTTS
 altair
 pytz
 tqdm
+gspread
+oauth2client
