@@ -88,32 +88,28 @@ def check_answer_callback(username, curr_q, target, today):
         is_correct = user_input.lower() == target.lower()
         
         # [속도 개선] API 호출 제거 -> 메모리 버퍼링 및 로컬 상태 관리
-        if st.session_state.is_first_attempt:
-            # 1. 학습 로그 버퍼링
-            if 'study_log_buffer' not in st.session_state: st.session_state.study_log_buffer = []
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            # 로그 포맷: [timestamp, date, word_id, username, level, is_correct]
-            st.session_state.study_log_buffer.append([
-                timestamp, str(today), int(curr_q['id']), username, int(curr_q['level']), 1 if is_correct else 0
-            ])
-            
-            # 2. 오답 노트 관리 (로컬 메모리)
-            if 'pending_wrongs_local' not in st.session_state: st.session_state.pending_wrongs_local = set()
-            
-            if not is_correct:
-                st.session_state.pending_wrongs_local.add(curr_q['id'])
-            elif st.session_state.get("quiz_mode") == "forced_review":
+        if is_correct:
+            if st.session_state.is_first_attempt:
+                # 1. 학습 로그 버퍼링
+                if 'study_log_buffer' not in st.session_state: st.session_state.study_log_buffer = []
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                # 로그 포맷: [timestamp, date, word_id, username, level, is_correct]
+                st.session_state.study_log_buffer.append([
+                    timestamp, str(today), int(curr_q['id']), username, int(curr_q['level']), 1
+                ])
+                
+                # 2. 오답 노트 관리 (로컬 메모리) - 정답 시 제거
+                if 'pending_wrongs_local' not in st.session_state: st.session_state.pending_wrongs_local = set()
                 if curr_q['id'] in st.session_state.pending_wrongs_local:
                     st.session_state.pending_wrongs_local.remove(curr_q['id'])
                 
-            # 3. 진행 중인 세션 관리 (로컬 메모리)
-            if 'pending_session_local' not in st.session_state: st.session_state.pending_session_local = set()
-            
-            if st.session_state.get("quiz_mode") == "normal":
-                if curr_q['id'] in st.session_state.pending_session_local:
-                    st.session_state.pending_session_local.remove(curr_q['id'])
+                # 3. 진행 중인 세션 관리 (로컬 메모리)
+                if 'pending_session_local' not in st.session_state: st.session_state.pending_session_local = set()
+                
+                if st.session_state.get("quiz_mode") == "normal":
+                    if curr_q['id'] in st.session_state.pending_session_local:
+                        st.session_state.pending_session_local.remove(curr_q['id'])
 
-        if is_correct:
             # [속도 개선] 메모리 상의 progress_df 사용
             if 'user_progress_df' not in st.session_state:
                 st.session_state.user_progress_df = utils.load_user_progress(username)
@@ -121,21 +117,45 @@ def check_answer_callback(username, curr_q, target, today):
             if st.session_state.is_first_attempt and st.session_state.get("quiz_mode") == "normal":
                 st.session_state.user_progress_df = utils.update_schedule(curr_q['id'], True, st.session_state.user_progress_df, today)
             
-            # [FIX] 오답 후 정답 맞췄을 때 오답 노트에서 제거 (재시도 성공 시에도 제거되어야 함)
-            if 'pending_wrongs_local' in st.session_state and curr_q['id'] in st.session_state.pending_wrongs_local:
-                st.session_state.pending_wrongs_local.remove(curr_q['id'])
-                
             st.session_state.quiz_state = "success"
+            st.session_state.last_result = "correct"
         else:
-            if st.session_state.is_first_attempt:
-                if 'user_progress_df' not in st.session_state:
-                    st.session_state.user_progress_df = utils.load_user_progress(username)
-                
-                if st.session_state.get("quiz_mode") == "normal":
-                    st.session_state.user_progress_df = utils.update_schedule(curr_q['id'], False, st.session_state.user_progress_df, today)
-                st.session_state.wrong_answers.append(curr_q)
-                st.session_state.is_first_attempt = False
+            # 오답 시 로직 변경: 바로 틀림 처리하지 않고 재시도 기회 부여 (Typos friendly)
             st.session_state.retry_mode = True
+
+def give_up_callback(username, curr_q, today):
+    """모름/포기 버튼 클릭 시 처리"""
+    # 1. 학습 로그 (오답=0)
+    if 'study_log_buffer' not in st.session_state: st.session_state.study_log_buffer = []
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    st.session_state.study_log_buffer.append([
+        timestamp, str(today), int(curr_q['id']), username, int(curr_q['level']), 0
+    ])
+    
+    # 2. 오답 노트 추가
+    if 'pending_wrongs_local' not in st.session_state: st.session_state.pending_wrongs_local = set()
+    st.session_state.pending_wrongs_local.add(curr_q['id'])
+    
+    # 3. 세션 목록에서 제거 (완료됨)
+    if 'pending_session_local' not in st.session_state: st.session_state.pending_session_local = set()
+    if st.session_state.get("quiz_mode") == "normal":
+        if curr_q['id'] in st.session_state.pending_session_local:
+            st.session_state.pending_session_local.remove(curr_q['id'])
+
+    # 4. 진도표 업데이트 (Fail)
+    if 'user_progress_df' not in st.session_state:
+        st.session_state.user_progress_df = utils.load_user_progress(username)
+        
+    if st.session_state.get("quiz_mode") == "normal":
+        st.session_state.user_progress_df = utils.update_schedule(curr_q['id'], False, st.session_state.user_progress_df, today)
+        
+    # 5. 오답 리스트 추가 (재학습용)
+    st.session_state.wrong_answers.append(curr_q)
+    st.session_state.is_first_attempt = False
+    
+    # 6. 정답 공개 상태로 전환
+    st.session_state.quiz_state = "success"
+    st.session_state.last_result = "gave_up"
 
 def submit_level_test_answer():
     user_input = st.session_state.test_input.strip()
@@ -921,30 +941,48 @@ def show_quiz_page():
                         
                         new_q = []
                         if not unlearned_df.empty:
-                            # 레벨 비율 조정 (현재 레벨 50%, 하위 20%, 상위 30%)
-                            lv_current = unlearned_df[unlearned_df['level'] == user_level]
-                            lv_lower = unlearned_df[unlearned_df['level'] < user_level]
-                            lv_higher = unlearned_df[unlearned_df['level'] > user_level]
+                            needed_new = batch_size
                             
-                            needed_new = batch_size 
+                            # [FIX] 신규 단어 출제 범위 제한 (현재 레벨 ±1)
+                            # 사용자가 Level 5라면 Level 4~6 범위에서만 출제
+                            min_lv = max(1, user_level - 1)
+                            max_lv = min(30, user_level + 1)
                             
-                            count_current = int(needed_new * 0.5)
-                            count_lower = int(needed_new * 0.2)
-                            count_higher = needed_new - count_current - count_lower
+                            # 1차 범위 (±1)
+                            candidate_df = unlearned_df[unlearned_df['level'].between(min_lv, max_lv)]
                             
-                            samples_current = lv_current.sample(n=min(len(lv_current), count_current)).to_dict('records')
-                            samples_lower = lv_lower.sample(n=min(len(lv_lower), count_lower)).to_dict('records')
-                            samples_higher = lv_higher.sample(n=min(len(lv_higher), count_higher)).to_dict('records')
+                            # 단어가 부족하면 2차 범위 (±2) 확장
+                            if len(candidate_df) < needed_new:
+                                min_lv_2 = max(1, user_level - 2)
+                                max_lv_2 = min(30, user_level + 2)
+                                candidate_df = unlearned_df[unlearned_df['level'].between(min_lv_2, max_lv_2)]
+                                
+                            # 그래도 부족하면 전체에서 (안전장치)
+                            if len(candidate_df) < needed_new:
+                                candidate_df = unlearned_df
                             
-                            new_q = samples_current + samples_lower + samples_higher
+                            # 우선순위: 현재 레벨(60%) -> 나머지(40%) (범위 내에서)
+                            # 이렇게 하면 범위 내에서도 자기 레벨을 더 많이 봄.
+                            current_pool = candidate_df[candidate_df['level'] == user_level]
+                            other_pool = candidate_df[candidate_df['level'] != user_level]
                             
-                            # 부족하면 나머지에서 채움
+                            count_current = int(needed_new * 0.6) # 60% 비중
+                            
+                            samples_current = current_pool.sample(n=min(len(current_pool), count_current)).to_dict('records')
+                            
+                            # 나머지는 other_pool에서 채우되, current가 부족했다면 other에서 더 채움
+                            needed_other = needed_new - len(samples_current)
+                            samples_other = other_pool.sample(n=min(len(other_pool), needed_other)).to_dict('records')
+                            
+                            new_q = samples_current + samples_other
+                            
+                            # 만약 아직도 부족하면 (other_pool도 부족) -> 다시 전체 unlearned에서 채움 (안전장치)
                             if len(new_q) < needed_new:
-                                remaining_ids = [q['id'] for q in new_q]
-                                rest_df = unlearned_df[~unlearned_df['id'].isin(remaining_ids)]
-                                more_needed = needed_new - len(new_q)
-                                additional_samples = rest_df.sample(n=min(len(rest_df), more_needed)).to_dict('records')
-                                new_q += additional_samples
+                                current_ids = [x['id'] for x in new_q]
+                                rest_df = unlearned_df[~unlearned_df['id'].isin(current_ids)]
+                                more = needed_new - len(new_q)
+                                if not rest_df.empty:
+                                    new_q += rest_df.sample(n=min(len(rest_df), more)).to_dict('records')
                         
                         random.shuffle(review_q)
                         random.shuffle(new_q)
@@ -994,21 +1032,33 @@ def show_quiz_page():
                 st.info(f"### {masked_sentence}")
 
             if st.session_state.retry_mode:
-                st.error(f"❌ 정답은 **{target}** 입니다. 다시 입력하세요.")
+                st.warning(f"❌ 틀렸습니다. 다시 시도해보세요!")
 
             input_key = f"quiz_in_{idx}_{st.session_state.retry_mode}"
             
+            # 입력창 (Enter 시 check_answer_callback 호출)
             st.text_input("정답 입력:", key=input_key, label_visibility="collapsed", placeholder="정답 입력 후 엔터", 
                           on_change=check_answer_callback, args=(username, curr_q, target, today))
+            
+            # [NEW] 포기(Pass) 버튼 추가
+            st.write("")
+            if st.button("🤷‍♂️ 정답을 모르겠어요 (Pass)", type="secondary", use_container_width=True, 
+                         on_click=give_up_callback, args=(username, curr_q, today)):
+                pass
+                
             utils.focus_element("input")
 
         elif st.session_state.quiz_state == "success":
             with st.container(border=True):
-                root = curr_q.get('root_word', '')
-                if root and isinstance(root, str) and root.strip() and root.lower() != target.lower():
-                    st.success(f"✅ 정답! **{target}** (원형: {root})")
+                # 결과에 따른 메시지 분기
+                if st.session_state.get("last_result") == "gave_up":
+                    st.error(f"❌ 아쉽네요. 정답은 **{target}** 입니다.")
                 else:
-                    st.success(f"✅ 정답! **{target}**")
+                    root = curr_q.get('root_word', '')
+                    if root and isinstance(root, str) and root.strip() and root.lower() != target.lower():
+                        st.success(f"✅ 정답! **{target}** (원형: {root})")
+                    else:
+                        st.success(f"✅ 정답! **{target}**")
                 
                 highlighted_html = utils.get_highlighted_sentence(curr_q['sentence_en'], target)
                 st.markdown(f"""<div class="success-sentence-box">{highlighted_html}</div>""", unsafe_allow_html=True)

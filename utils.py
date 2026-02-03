@@ -488,34 +488,49 @@ def get_user_info(username):
     df = read_sheet_to_df('users')
     if df.empty: return None
     
-    if username in df['username'].values:
-        user_row = df[df['username'] == username].iloc[0]
-        lv = user_row.get('level', '')
-        
-        # Helper to safely get int
-        def _safe_int(val, default):
-            try: return int(float(val))
-            except: return default
-
-        final_lv = _safe_int(lv, 1)
-        
-        # Read new fields
-        fail_streak = _safe_int(user_row.get('fail_streak'), 0)
-        level_shield = _safe_int(user_row.get('level_shield'), 3)
-        qs_count = _safe_int(user_row.get('qs_count'), 0)
-        pending_wrongs = str(user_row.get('pending_wrongs', ''))
-        pending_session = str(user_row.get('pending_session', ''))
-
-        return {
-            'level': final_lv, 
-            'name': user_row['name'], 
-            'password': user_row['password'],
-            'fail_streak': fail_streak,
-            'level_shield': level_shield,
-            'qs_count': qs_count,
-            'pending_wrongs': pending_wrongs,
-            'pending_session': pending_session
-        }
+    # [CASE-INSENSITIVE] 입력받은 ID를 소문자로 변환
+    username = username.lower().strip()
+    
+    # DB의 username도 소문자로 변환하여 비교 (데이터 정합성 보장)
+    # 벡터화 연산을 위해 임시 시리즈 생성
+    if 'username' in df.columns:
+        # DB에 저장된 값들도 소문자로 비교
+        match = df[df['username'].astype(str).str.lower() == username]
+        if not match.empty:
+            user_row = match.iloc[0]
+            # ... (나머지 로직 유지)
+            lv = user_row.get('level', '')
+            
+            # [MODIFIED] 레벨 미설정(신규) 유저 구분을 위해 기본값을 None으로 변경
+            final_lv = None
+            if lv is not None and str(lv).strip() != "":
+                try:
+                    final_lv = int(float(lv))
+                except:
+                    final_lv = None 
+            
+            # Helper to safely get int (Restored)
+            def _safe_int(val, default):
+                try: return int(float(val))
+                except: return default
+    
+            # Read new fields
+            fail_streak = _safe_int(user_row.get('fail_streak'), 0)
+            level_shield = _safe_int(user_row.get('level_shield'), 3)
+            qs_count = _safe_int(user_row.get('qs_count'), 0)
+            pending_wrongs = str(user_row.get('pending_wrongs', ''))
+            pending_session = str(user_row.get('pending_session', ''))
+    
+            return {
+                'level': final_lv, 
+                'name': user_row['name'], 
+                'password': user_row['password'],
+                'fail_streak': fail_streak,
+                'level_shield': level_shield,
+                'qs_count': qs_count,
+                'pending_wrongs': pending_wrongs,
+                'pending_session': pending_session
+            }
     return None
 
 def manage_session_state(username, action, data):
@@ -689,9 +704,16 @@ def register_user(username, password, name):
             if not ws:
                 return "ERROR"
 
+            # [CASE-INSENSITIVE] 소문자 변환
+            username = username.lower().strip()
+
             existing_df = read_sheet_to_df('users')
-            if not existing_df.empty and 'username' in existing_df.columns and username in existing_df['username'].values:
-                return "EXIST"
+            
+            # 중복 체크도 소문자 기준
+            if not existing_df.empty and 'username' in existing_df.columns:
+                existing_users = existing_df['username'].astype(str).str.lower().values
+                if username in existing_users:
+                    return "EXIST"
 
             hashed_pw = make_hashes(password)
             ws.append_row([username, hashed_pw, name, ""])
@@ -898,9 +920,12 @@ def get_random_question(level, exclude_ids=[]):
 
 def text_to_speech(word_id, text):
     """
-    1) 로컬 tts_audio/{word_id}.mp3 확인
-    2) 없으면 gTTS 생성 후 로컬 저장
-    3) 바이너리 데이터 반환
+    1) 텍스트 해시 기반 파일명 확인: tts_audio/{word_id}_{hash}.mp3
+    2) 있으면 반환
+    3) 없으면:
+       - 기존 해당 word_id의 구버전/다른 해시 파일 삭제 (청소)
+       - gTTS 생성 후 저장
+       - 반환
     """
     # 폴더 확보
     if not os.path.exists("tts_audio"):
@@ -908,9 +933,12 @@ def text_to_speech(word_id, text):
             os.makedirs("tts_audio")
         except: pass
         
-    file_path = f"tts_audio/{word_id}.mp3"
+    # 텍스트 해시 생성 (내용 변경 감지용)
+    text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()[:8]
+    filename = f"{word_id}_{text_hash}.mp3"
+    file_path = f"tts_audio/{filename}"
     
-    # 1. 로컬에 있으면 읽어서 반환
+    # 1. 현재 텍스트와 일치하는 캐시 파일이 있으면 반환
     if os.path.exists(file_path):
         try:
             with open(file_path, "rb") as f:
@@ -918,7 +946,22 @@ def text_to_speech(word_id, text):
         except:
             pass
 
-    # 2. 없으면 gTTS로 생성 후 저장
+    # 2. 없으면 새로 생성해야 함. 그 전에 구버전 파일 청소
+    # (예: 101.mp3 또는 101_oldhash.mp3)
+    try:
+        for f in os.listdir("tts_audio"):
+            # 해당 ID로 시작하는 파일 찾기
+            if f.startswith(f"{word_id}.") or f.startswith(f"{word_id}_"):
+                # 현재 필요한 파일이 아니면 삭제
+                if f != filename:
+                    try:
+                        os.remove(os.path.join("tts_audio", f))
+                    except:
+                        pass
+    except:
+        pass
+
+    # 3. gTTS로 생성 후 저장
     try:
         tts = gTTS(text=text, lang='en')
         tts.save(file_path)
