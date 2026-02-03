@@ -754,7 +754,7 @@ def show_dashboard_page():
             st.rerun()
 
     # [MOBILE OPTIMIZED] 메인 컬럼 제거
-    st.markdown(f"<h1 style='text-align: center;'>👋 안녕하세요, {realname} 학생!</h1>", unsafe_allow_html=True)
+    st.markdown(f"<h1 style='text-align: center;'>👋 안녕하세요.<br>{realname} 학생!</h1>", unsafe_allow_html=True)
     st.markdown(f"<h4 style='text-align: center; color: #4e8cff;'>현재 레벨: Lv.{user_level}</h4>", unsafe_allow_html=True)
     st.write("") 
 
