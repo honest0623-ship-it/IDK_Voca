@@ -279,9 +279,11 @@ def save_progress(username, progress_df):
             ws = get_worksheet('user_progress')
             if not ws: return
 
-            progress_df['username'] = username
-            progress_df['last_reviewed'] = progress_df['last_reviewed'].astype(str)
-            progress_df['next_review'] = progress_df['next_review'].astype(str)
+            # [FIX] 원본 DF 수정 방지를 위해 복사본 사용
+            df_to_save = progress_df.copy()
+            df_to_save['username'] = username
+            df_to_save['last_reviewed'] = df_to_save['last_reviewed'].astype(str)
+            df_to_save['next_review'] = df_to_save['next_review'].astype(str)
 
             all_data = ws.get_all_values() # 값만 가져오기 (가벼움) 
             
@@ -289,9 +291,9 @@ def save_progress(username, progress_df):
                 headers = all_data[0]
                 all_df = pd.DataFrame(all_data[1:], columns=headers)
                 other_users_df = all_df[all_df['username'] != username]
-                final_df = pd.concat([other_users_df, progress_df], ignore_index=True)
+                final_df = pd.concat([other_users_df, df_to_save], ignore_index=True)
             else:
-                final_df = progress_df
+                final_df = df_to_save
 
             ws.clear()
             ws.update([final_df.columns.values.tolist()] + final_df.values.tolist())
@@ -793,6 +795,10 @@ def update_schedule(word_id, is_correct, progress_df, today):
         
         # 이전 기록 가져오기 (업데이트 전)
         prev_last_reviewed = progress_df.loc[idx, 'last_reviewed']
+        # [방어 로직] 혹시 문자열이면 날짜 객체로 변환
+        if isinstance(prev_last_reviewed, str):
+            prev_last_reviewed = pd.to_datetime(prev_last_reviewed, errors='coerce').date()
+            
         cur_interval = _to_int(progress_df.loc[idx, 'interval'], 0)
         
         progress_df.loc[idx, 'last_reviewed'] = today
