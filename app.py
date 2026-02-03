@@ -93,21 +93,31 @@ def check_answer_callback(username, curr_q, target, today):
     if user_input:
         is_correct = user_input.lower() == target.lower()
         
-        # [데이터 안전성 강화] 즉시 저장 (중간 이탈 대비)
+        # [속도 개선] API 호출 제거 -> 메모리 버퍼링 및 로컬 상태 관리
         if st.session_state.is_first_attempt:
-            # 1. 학습 로그 저장
-            utils.log_study_result(username, curr_q['id'], curr_q['level'], is_correct)
+            # 1. 학습 로그 버퍼링
+            if 'study_log_buffer' not in st.session_state: st.session_state.study_log_buffer = []
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # 로그 포맷: [timestamp, date, word_id, username, level, is_correct]
+            st.session_state.study_log_buffer.append([
+                timestamp, str(today), int(curr_q['id']), username, int(curr_q['level']), 1 if is_correct else 0
+            ])
             
-            # 2. 오답 노트 관리 (Pending Wrongs)
+            # 2. 오답 노트 관리 (로컬 메모리)
+            if 'pending_wrongs_local' not in st.session_state: st.session_state.pending_wrongs_local = set()
+            
             if not is_correct:
-                utils.manage_pending_wrongs(username, 'add', curr_q['id'])
+                st.session_state.pending_wrongs_local.add(curr_q['id'])
             elif st.session_state.get("quiz_mode") == "forced_review":
-                utils.manage_pending_wrongs(username, 'remove', curr_q['id'])
+                if curr_q['id'] in st.session_state.pending_wrongs_local:
+                    st.session_state.pending_wrongs_local.remove(curr_q['id'])
                 
-            # [NEW] 3. 진행 중인 세션 관리 (Pending Session)
-            # 일반 모드일 때만 세션에서 제거 (강제 복습 모드는 별개)
+            # 3. 진행 중인 세션 관리 (로컬 메모리)
+            if 'pending_session_local' not in st.session_state: st.session_state.pending_session_local = set()
+            
             if st.session_state.get("quiz_mode") == "normal":
-                utils.manage_session_state(username, 'remove', curr_q['id'])
+                if curr_q['id'] in st.session_state.pending_session_local:
+                    st.session_state.pending_session_local.remove(curr_q['id'])
 
         if is_correct:
             # [속도 개선] 메모리 상의 progress_df 사용
@@ -260,12 +270,32 @@ def handle_session_end(username, progress_df, today):
     user_info = utils.get_user_info(username)
     current_level = int(user_info['level']) if user_info and pd.notna(user_info['level']) else 1
     
-    # [속도 개선] 세트 종료 시 일괄 저장 (진도표만)
+    # [속도 개선] 세트 종료 시 일괄 저장 (진도표, 학습 로그, 상태 관리)
     with st.spinner("학습 기록을 저장 중입니다..."):
+        # 1. 진도표 저장
         if 'user_progress_df' in st.session_state:
             utils.save_progress(username, st.session_state.user_progress_df)
         
-        # 학습 로그(study_log)는 문제 풀 때마다 즉시 저장되므로 여기서 저장 안 함.
+        # 2. 학습 로그 일괄 저장
+        if 'study_log_buffer' in st.session_state and st.session_state.study_log_buffer:
+            utils.batch_log_study_results(st.session_state.study_log_buffer)
+            st.session_state.study_log_buffer = [] # 버퍼 비우기
+            
+        # 3. 상태 관리 (Pending Wrongs & Session) DB 동기화
+        updates = {}
+        
+        # Pending Wrongs
+        if 'pending_wrongs_local' in st.session_state:
+            new_wrongs_str = ",".join(str(x) for x in st.session_state.pending_wrongs_local)
+            updates['pending_wrongs'] = new_wrongs_str
+            
+        # Pending Session
+        if 'pending_session_local' in st.session_state:
+            new_session_str = ",".join(str(x) for x in st.session_state.pending_session_local)
+            updates['pending_session'] = new_session_str
+            
+        if updates:
+            utils.update_user_dynamic_fields(username, updates)
 
     # 학습 로그 분석 (구글 시트)
     # [NEW] 방어 구간 & 연패 방지 로직 적용
@@ -816,9 +846,15 @@ def show_quiz_page():
                 pending_wrongs_str = user_info.get('pending_wrongs', '')
                 pending_ids = [int(x) for x in pending_wrongs_str.split(',') if x.strip().isdigit()]
                 
+                # [로컬 상태 초기화]
+                st.session_state.pending_wrongs_local = set(pending_ids)
+                
                 # [NEW] 2. 중단된 세션 확인 (Resume Session)
                 pending_session_str = user_info.get('pending_session', '')
                 session_ids = [int(x) for x in pending_session_str.split(',') if x.strip().isdigit()]
+                
+                # [로컬 상태 초기화]
+                st.session_state.pending_session_local = set(session_ids)
 
                 if pending_ids:
                     # 강제 복습 모드 진입
@@ -904,8 +940,9 @@ def show_quiz_page():
                     random.shuffle(new_q)
                     combined = review_q + new_q
                     
-                    # [데이터 안전성] 세션 상태 즉시 저장
+                    # [데이터 안전성] 세션 상태 즉시 저장 -> 로컬 상태 업데이트 + 초기 저장
                     session_ids_to_save = [q['id'] for q in combined]
+                    st.session_state.pending_session_local = set(session_ids_to_save)
                     utils.manage_session_state(username, 'set', session_ids_to_save)
                     
                     # 퀴즈 리스트 세팅
