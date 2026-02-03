@@ -32,8 +32,26 @@ def main():
                 font-weight: 500;
                 line-height: 1.5;
             }
+            /* [NEW] 모바일 당겨서 새로고침 방지 (Overscroll Prevention) */
+            html, body {
+                overscroll-behavior-y: contain !important;
+            }
         </style>
     """, unsafe_allow_html=True)
+
+    # [NEW] 새로고침/뒤로가기 방지 경고창 (Javascript Injection)
+    components.html("""
+        <script>
+            try {
+                window.parent.addEventListener('beforeunload', function (e) {
+                    e.preventDefault();
+                    e.returnValue = ''; // Chrome 등 최신 브라우저 필수 설정
+                });
+            } catch (err) {
+                console.log("Prevention Script Error: " + err);
+            }
+        </script>
+    """, height=0)
     
     if 'logged_in' not in st.session_state:
         st.session_state.logged_in = False
