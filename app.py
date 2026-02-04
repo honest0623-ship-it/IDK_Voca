@@ -1041,6 +1041,11 @@ def show_quiz_page():
                     
                     # [로컬 상태 초기화]
                     st.session_state.pending_session_local = set(session_ids)
+                    
+                    # [NEW] 유효성 검사: 실제로 DB에 존재하는 문제인지 확인
+                    resume_q = []
+                    if session_ids:
+                        resume_q = df[df['id'].isin(session_ids)].to_dict('records')
 
                     if pending_ids:
                         # 강제 복습 모드 진입
@@ -1058,9 +1063,8 @@ def show_quiz_page():
                         
                         st.warning("⚠️ 지난 학습에서 완료하지 못한 오답이 있습니다. 이를 먼저 해결해야 합니다!")
 
-                    elif session_ids:
-                         # 세션 이어하기 모드
-                        resume_q = df[df['id'].isin(session_ids)].to_dict('records')
+                    elif session_ids and resume_q:
+                         # 세션 이어하기 모드 (문제 목록이 유효할 때만)
                         # 순서는 섞는 게 학습 효과에 좋음 (또는 저장된 순서 유지? DB엔 집합으로 저장됨 -> 섞자)
                         random.shuffle(resume_q)
                         
