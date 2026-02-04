@@ -159,7 +159,7 @@ def main():
 
 # --- 콜백 (화면 상태 변경) ---
 def check_answer_callback(username, curr_q, target, today):
-    input_key = f"quiz_in_{st.session_state.current_idx}_{st.session_state.retry_mode}"
+    input_key = f"quiz_in_{st.session_state.current_idx}_{st.session_state.retry_mode}_{st.session_state.get('gave_up_mode', False)}"
     user_input = st.session_state.get(input_key, "").strip()
 
     if user_input:
@@ -1210,7 +1210,7 @@ def show_quiz_page():
                 default_val = st.session_state.get('last_wrong_input', "")
             
             # 입력창 (Enter 시 check_answer_callback 호출)
-            placeholder_text = "정답을 입력하세요" if not st.session_state.get('gave_up_mode', False) else "위 정답을 똑같이 입력하세요"
+            placeholder_text = "정답 입력 후 엔터" if not st.session_state.get('gave_up_mode', False) else "위 정답을 똑같이 입력 후 엔터"
             st.text_input("정답 입력:", value=default_val, key=input_key, label_visibility="collapsed", placeholder=placeholder_text, 
                           on_change=check_answer_callback, args=(username, curr_q, target, today))
             
