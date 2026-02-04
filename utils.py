@@ -1118,3 +1118,76 @@ def adjust_level_based_on_stats():
     except Exception as e:
         print(f"Level Adjust Error: {e}")
         return 0, f"오류 발생: {e}"
+
+def update_student_info(old_username, new_username, new_name, new_level):
+    """학생 정보 수정 (ID, 이름, 레벨)"""
+    # 1. 중복 ID 체크 (ID가 변경된 경우에만)
+    if old_username != new_username:
+        # 소문자 비교
+        new_username = new_username.lower().strip()
+        old_username = old_username.lower().strip()
+        
+        users_df = get_all_users()
+        if not users_df.empty and new_username in users_df['username'].str.lower().values:
+             return "DUPLICATE"
+    else:
+        old_username = old_username.lower().strip()
+        new_username = old_username # Ensure consistency
+
+    # 2. Users 시트 업데이트
+    try:
+        ws = get_worksheet('users')
+        if not ws: return "DB_ERROR"
+        
+        # [FIX] find는 대소문자를 구분하므로, 전체 컬럼을 가져와서 직접 찾기
+        usernames = ws.col_values(1) # 1번 컬럼(username) 전체 가져오기
+        
+        found_row = -1
+        for i, u in enumerate(usernames):
+            if str(u).strip().lower() == old_username:
+                found_row = i + 1 # 1-based index
+                break
+                
+        if found_row == -1: return "NOT_FOUND"
+        
+        # update_cell(row, col, val)
+        # Col 1: username, Col 3: name, Col 4: level
+        ws.update_cell(found_row, 1, new_username)
+        ws.update_cell(found_row, 3, new_name)
+        ws.update_cell(found_row, 4, new_level)
+        
+    except Exception as e:
+        return f"UPDATE_ERROR: {e}"
+
+    # 3. ID가 변경되었다면 관련 테이블(Study Log, Progress)도 업데이트
+    if old_username != new_username:
+        _update_related_tables(old_username, new_username)
+        
+    bump_sheet_cache_ver()
+    st.cache_data.clear()
+    return "SUCCESS"
+
+def _update_related_tables(old_user, new_user):
+    # User Progress
+    try:
+        ws = get_worksheet('user_progress')
+        if ws:
+            headers = ws.row_values(1)
+            if 'username' in headers:
+                col_idx = headers.index('username') + 1
+                cells = ws.findall(old_user, in_column=col_idx)
+                for c in cells: c.value = new_user
+                if cells: ws.update_cells(cells)
+    except: pass
+    
+    # Study Log
+    try:
+        ws = get_worksheet('study_log')
+        if ws:
+            headers = ws.row_values(1)
+            if 'username' in headers:
+                col_idx = headers.index('username') + 1
+                cells = ws.findall(old_user, in_column=col_idx)
+                for c in cells: c.value = new_user
+                if cells: ws.update_cells(cells)
+    except: pass

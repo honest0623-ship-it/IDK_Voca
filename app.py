@@ -200,6 +200,7 @@ def check_answer_callback(username, curr_q, target, today):
         else:
             # 오답 시 로직 변경: 바로 틀림 처리하지 않고 재시도 기회 부여 (Typos friendly)
             st.session_state.retry_mode = True
+            st.session_state.last_wrong_input = user_input # [NEW] 오답 내용 보존
 
 def give_up_callback(username, curr_q, today):
     """모름/포기 버튼 클릭 시 처리"""
@@ -610,15 +611,52 @@ def show_admin_page():
             st.dataframe(users[['username', 'name', 'level']], use_container_width=True)
             
             st.write("---")
+            st.subheader("🛠 학생 정보 수정")
+            
+            # 학생 선택
+            selected_user_id = st.selectbox("수정할 학생 선택", users['username'].tolist())
+            
+            if selected_user_id:
+                # 선택된 학생의 현재 정보 가져오기
+                current_info = users[users['username'] == selected_user_id].iloc[0]
+                
+                with st.form("edit_student_form"):
+                    c1, c2, c3 = st.columns(3)
+                    with c1:
+                        new_id = st.text_input("아이디 (ID)", value=current_info['username'])
+                    with c2:
+                        new_name = st.text_input("이름", value=current_info['name'])
+                    with c3:
+                        new_level = st.number_input("레벨", min_value=1, max_value=30, value=int(current_info['level']) if pd.notna(current_info['level']) and str(current_info['level']).isdigit() else 1)
+                        
+                    submit_edit = st.form_submit_button("💾 정보 수정 저장")
+                    
+                    if submit_edit:
+                        if not new_id or not new_name:
+                            st.warning("아이디와 이름은 필수입니다.")
+                        else:
+                            res = utils.update_student_info(selected_user_id, new_id, new_name, new_level)
+                            if res == "SUCCESS":
+                                st.success("✅ 학생 정보가 수정되었습니다.")
+                                time.sleep(1)
+                                st.rerun()
+                            elif res == "DUPLICATE":
+                                st.error("❌ 이미 존재하는 아이디입니다.")
+                            else:
+                                st.error(f"❌ 수정 실패: {res}")
+
+            st.write("---")
+            st.subheader("🔐 비밀번호 초기화")
             col_sel, col_btn = st.columns([3, 1])
             with col_sel:
-                reset_user = st.selectbox("비밀번호 초기화할 학생 선택", users['username'].tolist())
+                # 위에서 선택한 학생을 기본값으로 사용
+                reset_target = st.text_input("초기화 대상 (자동 입력)", value=selected_user_id, disabled=True)
             with col_btn:
                 st.write("")
                 if st.button("비밀번호 '1234'로 초기화", type="primary"):
-                    success = utils.reset_user_password(reset_user, '1234')
+                    success = utils.reset_user_password(selected_user_id, '1234')
                     if success:
-                        st.success(f"✅ {reset_user} 학생 비밀번호 초기화 완료!")
+                        st.success(f"✅ {selected_user_id} 학생 비밀번호 초기화 완료!")
                     else:
                         st.error("초기화 실패")
         else:
@@ -1010,6 +1048,11 @@ def show_quiz_page():
                                 (progress_df['next_review'] <= today) & 
                                 (~progress_df['word_id'].isin(today_reviewed))
                             ]['word_id'].tolist()
+                            
+                            # [FIX] 복습량 폭탄 방지: 한 번에 최대 50개까지만 로드
+                            if len(review_ids) > 50:
+                                review_ids = review_ids[:50]
+                            
                             review_q = df[df['id'].isin(review_ids)].to_dict('records')
                         
                         # 2. 신규 학습 단어
@@ -1113,8 +1156,13 @@ def show_quiz_page():
 
             input_key = f"quiz_in_{idx}_{st.session_state.retry_mode}"
             
+            # [NEW] 재시도 시 이전 오답값 불러오기
+            default_val = ""
+            if st.session_state.retry_mode:
+                default_val = st.session_state.get('last_wrong_input', "")
+            
             # 입력창 (Enter 시 check_answer_callback 호출)
-            st.text_input("정답 입력:", key=input_key, label_visibility="collapsed", placeholder="정답 입력 후 엔터", 
+            st.text_input("정답 입력:", value=default_val, key=input_key, label_visibility="collapsed", placeholder="정답 입력 후 엔터", 
                           on_change=check_answer_callback, args=(username, curr_q, target, today))
             
             # [NEW] 포기(Pass) 버튼 추가
