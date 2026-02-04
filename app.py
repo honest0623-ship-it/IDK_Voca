@@ -167,6 +167,13 @@ def check_answer_callback(username, curr_q, target, today):
         
         # [속도 개선] API 호출 제거 -> 메모리 버퍼링 및 로컬 상태 관리
         if is_correct:
+            # [NEW] 포기 모드(정답 보고 따라 치기)인 경우 -> 성공 처리하되 로그는 남기지 않음 (이미 실패로 기록됨)
+            if st.session_state.get('gave_up_mode', False):
+                 st.session_state.quiz_state = "success"
+                 st.session_state.last_result = "gave_up" # 결과 화면 메시지용
+                 st.session_state.gave_up_mode = False # 모드 해제
+                 return
+
             if st.session_state.is_first_attempt:
                 # 1. 학습 로그 버퍼링
                 if 'study_log_buffer' not in st.session_state: st.session_state.study_log_buffer = []
@@ -232,43 +239,58 @@ def give_up_callback(username, curr_q, today):
     st.session_state.wrong_answers.append(curr_q)
     st.session_state.is_first_attempt = False
     
-    # 6. 정답 공개 상태로 전환
-    st.session_state.quiz_state = "success"
-    st.session_state.last_result = "gave_up"
+    # [CHANGE] 정답 공개 후 '따라 치기' 모드로 전환 (바로 넘어가지 않음)
+    st.session_state.gave_up_mode = True
+    st.session_state.quiz_state = "answering" # 여전히 입력 상태 유지
+    st.session_state.retry_mode = False # 에러 메시지 초기화
+
 
 def submit_level_test_answer():
     user_input = st.session_state.test_input.strip()
     if not user_input:
-        return # 빈 입력 무시
+        return 
     
-    process_level_test_step(user_input, is_pass=False)
+    current_q = st.session_state.current_question
+    target = current_q['target_word']
+    
+    if user_input.lower() == target.lower():
+        st.session_state.level_test_state = 'success'
+        st.session_state.level_test_result = 'correct'
+        st.session_state.level_test_retry = False
+    else:
+        st.session_state.level_test_retry = True
+        st.session_state.last_wrong_input = user_input
 
 def pass_level_test_question():
-    process_level_test_step("", is_pass=True)
+    st.session_state.level_test_state = 'success'
+    st.session_state.level_test_result = 'pass'
+    st.session_state.level_test_retry = False
 
-def process_level_test_step(user_input, is_pass):
-    idx = len(st.session_state.test_history) + 1 # 현재 문항 번호 (1~30)
+def proceed_to_next_level_question():
+    """다음 레벨 계산 및 문제 로드 (기존 process_level_test_step 로직 이동)"""
+    idx = len(st.session_state.test_history) + 1 
     current_q = st.session_state.current_question
     current_level = st.session_state.current_test_level
     
-    # 1. 정답 확인
-    is_correct = False
-    if not is_pass:
-        is_correct = user_input.lower() == current_q['target_word'].lower()
+    # 결과 가져오기 ('correct' or 'pass')
+    result_type = st.session_state.level_test_result
     
     # 2. 기록 저장
+    # 사용자 입력값: 정답이면 정답 단어, Pass면 "PASS", Retry 중 맞춘 경우도 정답 단어
+    final_input = current_q['target_word'] if result_type == 'correct' else "PASS"
+    
     st.session_state.test_history.append({
         'q_num': idx,
         'level': current_level,
         'word': current_q['target_word'],
-        'user_input': user_input if not is_pass else "PASS",
-        'result': 'correct' if is_correct else ('pass' if is_pass else 'wrong')
+        'user_input': final_input,
+        'result': 'correct' if result_type == 'correct' else 'wrong', # 알고리즘용 (Pass는 Wrong 취급)
+        'q_id': current_q['id']
     })
     
-    # 3. 다음 레벨 계산 (알고리즘 핵심)
-    # [1단계] 광범위 탐색 (Q1 ~ Q7) -> Step 4
-    # [2단계] 정밀 접근 (Q8 ~ Q22) -> Step 2 (+Bonus)
-    # [3단계] 최종 검증 (Q23 ~ Q30) -> Step 1
+    # 3. 다음 레벨 계산 (알고리즘)
+    is_correct = (result_type == 'correct')
+    is_pass = (result_type == 'pass')
     
     step = 0
     if idx <= 7: step = 4
@@ -278,21 +300,16 @@ def process_level_test_step(user_input, is_pass):
     next_level = current_level
     
     if is_correct:
-        # 가속도 로직 (2단계에서 연속 정답 시 +3)
         bonus = 0
         if 8 <= idx <= 22:
-            # 이전 문제도 정답이었는지 확인
             if len(st.session_state.test_history) >= 2:
                 prev_res = st.session_state.test_history[-2]['result']
                 if prev_res == 'correct':
-                    bonus = 1 # 기본 step 2 + 1 = 3
+                    bonus = 1 
         
         final_step = step + bonus
         
-        # Gatekeeper: Lv 15 -> 16 진입 시 (2단계)
         if current_level == 15 and idx <= 22:
-            # 이전 기록 확인: 이번이 Lv 15에서의 '첫' 정답이라면 대기
-            # (직전 문제가 Lv 15였고 정답이었어야 통과)
             can_pass_gate = False
             if len(st.session_state.test_history) >= 2:
                 prev_log = st.session_state.test_history[-2]
@@ -302,26 +319,23 @@ def process_level_test_step(user_input, is_pass):
             if can_pass_gate:
                 next_level += final_step
             else:
-                pass # 레벨 유지 (한 번 더 검증)
+                pass 
         else:
             next_level += final_step
             
     elif is_pass:
-        # 모름 버튼: 하락 폭 50%
         drop = step / 2.0
         next_level -= drop
     else:
-        # 오답
+        # Retry 하다가 Pass한 경우도 여기 포함됨 (is_pass 로직상)
+        # 만약 로직이 복잡해지면 'wrong' 처리를 명확히 해야 함
         next_level -= step
         
-    # 범위 제한 (1~30)
     next_level = int(round(next_level))
     next_level = max(1, min(30, next_level))
     
-    # 4. 조기 종료 (Early Stop) 체크
-    # Q1~Q15 구간에서, Lv 3 이하 문제를 연속 3번 이상 틀리거나 모를 때
+    # 4. 조기 종료 체크
     if idx <= 15 and current_level <= 3 and (not is_correct):
-        # 최근 3개 기록 확인
         recent_fails = 0
         for log in st.session_state.test_history[-3:]:
             if log['level'] <= 3 and log['result'] in ['wrong', 'pass']:
@@ -330,29 +344,20 @@ def process_level_test_step(user_input, is_pass):
         if recent_fails >= 3:
             st.session_state.early_stop = True
             st.session_state.final_level_result = 1
-            st.session_state.test_input = "" # 입력 초기화
+            st.session_state.test_input = ""
+            st.session_state.level_test_state = 'answering'
             return
 
-    # 5. 다음 상태 설정
     st.session_state.current_test_level = next_level
-    st.session_state.test_input = "" # 입력 초기화
+    st.session_state.test_input = ""
+    st.session_state.level_test_state = 'answering' # 상태 리셋
+    st.session_state.level_test_retry = False
     
-    # 30번 문제까지 풀었으면 종료
     if idx >= 30:
-        # 최종 레벨 산출: [3단계] Q23~Q30 (마지막 8개)의 평균 '출제 레벨'
         last_8_logs = st.session_state.test_history[-8:]
         avg_lv = sum(log['level'] for log in last_8_logs) / len(last_8_logs)
         st.session_state.final_level_result = int(round(avg_lv))
     else:
-        # 다음 문제 로드
-        exclude_ids = [log.get('q_id') for log in st.session_state.test_history if 'q_id' in log] # q_id 저장 필요.. 아차 위에서 안했네. utils 수정없이 여기서 해결
-        # 위 history에 q_id가 없으므로 word로 제외하거나, 그냥 중복 허용? 
-        # -> utils.get_random_question에 exclude_ids 기능 넣었으니 활용.
-        # history 저장 시 q_id 추가해야 함. (아래 코드 수정)
-        
-        # history 마지막 항목에 q_id 업데이트 (꼼수)
-        st.session_state.test_history[-1]['q_id'] = current_q['id']
-        
         exclude_ids = [h.get('q_id') for h in st.session_state.test_history if 'q_id' in h]
         next_q = utils.get_random_question(next_level, exclude_ids)
         st.session_state.current_question = next_q
@@ -517,11 +522,25 @@ def handle_session_end(username, progress_df, today):
                     st.rerun()
 
 def show_login_page():
+    # [NEW] 가입 완료 팝업 모드
+    if st.session_state.get('signup_success_popup', False):
+        with st.container(border=True):
+            st.markdown("<br><h2 style='text-align: center;'>✅ 가입 완료되었습니다</h2>", unsafe_allow_html=True)
+            st.markdown("<p style='text-align: center; color: gray;'>엔터를 누르면 로그인 화면으로 이동합니다.</p>", unsafe_allow_html=True)
+            
+            if st.button("확인 (Enter)", type="primary", use_container_width=True, key="btn_signup_ok"):
+                st.session_state.signup_success_popup = False
+                st.session_state.login_menu_choice = "로그인" 
+                st.rerun()
+            
+            utils.focus_element("button")
+        return
+
     # [MOBILE OPTIMIZED] 중앙 정렬 컨테이너 사용
     with st.container(border=True):
         st.markdown("<h1 style='text-align: center;'>🔐 학생 로그인</h1>", unsafe_allow_html=True)
         menu = ["로그인", "회원가입"]
-        choice = st.selectbox("메뉴", menu)
+        choice = st.selectbox("메뉴", menu, key="login_menu_choice")
         
         if choice == "로그인":
             if 'signup_success' in st.session_state: del st.session_state['signup_success']
@@ -564,8 +583,8 @@ def show_login_page():
                     # 구글 시트에 가입 요청
                     result = utils.register_user(new_user, new_password, new_realname)
                     if result == "SUCCESS":
-                        st.success("✅ 가입완료되었습니다! 로그인 메뉴로 이동하세요.")
-                        st.session_state.signup_success = True
+                        st.session_state.signup_success_popup = True
+                        st.rerun()
                     elif result == "EXIST":
                         st.warning("이미 존재하는 아이디입니다.")
                     else:
@@ -749,19 +768,32 @@ def show_level_test_page():
                 font-size: 20px !important;
                 padding: 10px !important;
             }
+            .success-sentence-box {
+                background-color: #f0f2f6;
+                padding: 15px;
+                border-radius: 10px;
+                text-align: center;
+                font-size: 1.2em !important;
+                margin-bottom: 15px;
+                color: #31333F;
+                font-weight: 500;
+                line-height: 1.5;
+            }
         </style>
     """, unsafe_allow_html=True)
 
     # --- 초기화 ---
     if 'test_history' not in st.session_state:
         st.session_state.test_history = []
-        st.session_state.current_test_level = 8 # 시작 레벨 8
+        st.session_state.current_test_level = 8 
         st.session_state.early_stop = False
-        # 첫 문제 로드
         st.session_state.current_question = utils.get_random_question(8, [])
         st.session_state.final_level_result = None
+        st.session_state.level_test_state = 'answering' # answering, success
+        st.session_state.level_test_retry = False
+        st.session_state.level_test_result = None # correct, pass
 
-    # --- 결과 화면 ---
+    # --- 결과 화면 (테스트 완료 시) ---
     if st.session_state.final_level_result is not None:
         final_lv = st.session_state.final_level_result
         if final_lv < 1: final_lv = 1
@@ -784,43 +816,26 @@ def show_level_test_page():
                     time.sleep(1)
                     st.session_state.is_level_testing = False
                     st.session_state.page = 'dashboard'
-                    # 세션 정리
                     del st.session_state.test_history
                     del st.session_state.current_test_level
                     del st.session_state.current_question
                     del st.session_state.final_level_result
                     if 'early_stop' in st.session_state: del st.session_state.early_stop
+                    if 'level_test_state' in st.session_state: del st.session_state.level_test_state
                     st.rerun()
                     
                 if st.button("🔄 재시험", use_container_width=True):
-                    del st.session_state.test_history
-                    del st.session_state.current_test_level
-                    del st.session_state.current_question
-                    del st.session_state.final_level_result
-                    if 'early_stop' in st.session_state: del st.session_state.early_stop
+                    keys = ['test_history', 'current_test_level', 'current_question', 'final_level_result', 'early_stop', 'level_test_state']
+                    for k in keys:
+                        if k in st.session_state: del st.session_state[k]
                     st.rerun()
-                    
-            # 상세 기록 (디버깅/확인용)
-            with st.expander("📝 상세 기록 보기"):
-                history_df = pd.DataFrame(st.session_state.test_history)
-                if not history_df.empty:
-                    # 결과 이모지 매핑
-                    display_df = history_df.copy()
-                    
-                    def _format_result(val):
-                        if val == 'correct': return "🟢 정답"
-                        elif val == 'wrong': return "❌ 오답"
-                        elif val == 'pass': return "❌ 패스"
-                        return val
-                        
-                    display_df['result'] = display_df['result'].apply(_format_result)
-                    st.dataframe(display_df[['q_num', 'level', 'word', 'result']], use_container_width=True)
         return
 
     # --- 문제 진행 화면 ---
     q = st.session_state.current_question
     idx = len(st.session_state.test_history) + 1
     cur_lv = st.session_state.current_test_level
+    target = q['target_word']
     
     # 진행 단계 표시
     stage_name = ""
@@ -828,28 +843,54 @@ def show_level_test_page():
     elif idx <= 22: stage_name = "2단계: 정밀 접근"
     else: stage_name = "3단계: 최종 검증"
     
-    _, col, _ = st.columns([1, 2, 1])
+    # TTS 오디오 가져오기
+    audio_data = utils.text_to_speech(q['id'], q['sentence_en'])
+
+    # UI 렌더링 (show_quiz_page 스타일 차용)
+    _, col, _ = st.columns([1, 2, 1]) # 모바일 최적화 레이아웃
     with col:
+        st.write(f"**Level Test {idx} / 30**")
         st.progress(idx / 30)
-        st.caption(f"문제 {idx} / 30 ({stage_name} - Lv.{cur_lv})")
+        st.caption(f"현재 난이도: {stage_name} (Lv.{cur_lv})")
         
-        with st.container(border=True):
-            st.subheader(f"💡 뜻: {q['meaning']}")
-            st.write(f"📖 해석: {q['sentence_ko']}")
-            masked = utils.get_masked_sentence(q['sentence_en'], q['target_word'], q.get('root_word'))
-            st.markdown(f"<div style='background:#f0f2f6; padding:15px; border-radius:10px; font-size:1.2em; font-weight:bold;'>{masked}</div>", unsafe_allow_html=True)
-        
-        st.text_input("정답 입력", key="test_input", on_change=submit_level_test_answer, label_visibility="collapsed", placeholder="정답 입력 후 Enter")
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("제출 (Enter)", type="primary", use_container_width=True, on_click=submit_level_test_answer):
+        if st.session_state.level_test_state == 'answering':
+            with st.container(border=True):
+                st.subheader(f"💡 뜻: {q['meaning']}")
+                st.write(f"📖 해석: {q['sentence_ko']}")
+                masked = utils.get_masked_sentence(q['sentence_en'], target, q.get('root_word'))
+                st.info(f"### {masked}")
+            
+            if st.session_state.level_test_retry:
+                st.warning("❌ 틀렸습니다. 다시 시도해보세요!")
+                
+            # 입력창
+            default_val = st.session_state.get('last_wrong_input', "") if st.session_state.level_test_retry else ""
+            st.text_input("정답 입력", value=default_val, key="test_input", on_change=submit_level_test_answer, label_visibility="collapsed", placeholder="정답 입력 후 Enter")
+            
+            st.write("")
+            if st.button("🤷‍♂️ 잘 모르겠어요 (Pass)", type="secondary", use_container_width=True, on_click=pass_level_test_question):
                 pass
-        with c2:
-            if st.button("🤷‍♂️ 잘 모르겠어요 (Pass)", use_container_width=True, on_click=pass_level_test_question):
+            
+            utils.focus_element("input")
+
+        elif st.session_state.level_test_state == 'success':
+            # 결과 화면 (정답 or 포기 후 정답 공개)
+            with st.container(border=True):
+                if st.session_state.level_test_result == 'pass':
+                    st.error(f"❌ 아쉽네요. 정답은 **{target}** 입니다.")
+                else:
+                    st.success(f"✅ 정답! **{target}**")
+                
+                highlighted_html = utils.get_highlighted_sentence(q['sentence_en'], target)
+                st.markdown(f"""<div class="success-sentence-box">{highlighted_html}</div>""", unsafe_allow_html=True)
+                
+                if audio_data:
+                    st.audio(audio_data, format='audio/mp3', autoplay=True)
+            
+            if st.button("다음 문제 ➡ (Enter)", type="primary", use_container_width=True, on_click=proceed_to_next_level_question):
                 pass
-        
-        utils.focus_element("input")
+            
+            utils.focus_element("button")
 
 def show_dashboard_page():
     username = st.session_state.username
@@ -1148,28 +1189,37 @@ def show_quiz_page():
             with st.container(border=True):
                 st.subheader(f"💡 뜻: {curr_q['meaning']}")
                 st.write(f"📖 해석: {curr_q['sentence_ko']}")
-                masked_sentence = utils.get_masked_sentence(curr_q['sentence_en'], target, curr_q.get('root_word'))
+                
+                # [CHANGE] 포기 모드일 때 정답 공개
+                if st.session_state.get('gave_up_mode', False):
+                     st.error(f"❌ 정답은 **{target}** 입니다. 아래에 똑같이 입력하세요.")
+                     masked_sentence = utils.get_masked_sentence(curr_q['sentence_en'], target, curr_q.get('root_word')) # 문장은 그대로 가림 (입력 유도)
+                else:
+                     masked_sentence = utils.get_masked_sentence(curr_q['sentence_en'], target, curr_q.get('root_word'))
+                
                 st.info(f"### {masked_sentence}")
 
-            if st.session_state.retry_mode:
+            if st.session_state.retry_mode and not st.session_state.get('gave_up_mode', False):
                 st.warning(f"❌ 틀렸습니다. 다시 시도해보세요!")
 
-            input_key = f"quiz_in_{idx}_{st.session_state.retry_mode}"
+            input_key = f"quiz_in_{idx}_{st.session_state.retry_mode}_{st.session_state.get('gave_up_mode', False)}"
             
             # [NEW] 재시도 시 이전 오답값 불러오기
             default_val = ""
-            if st.session_state.retry_mode:
+            if st.session_state.retry_mode and not st.session_state.get('gave_up_mode', False):
                 default_val = st.session_state.get('last_wrong_input', "")
             
             # 입력창 (Enter 시 check_answer_callback 호출)
-            st.text_input("정답 입력:", value=default_val, key=input_key, label_visibility="collapsed", placeholder="정답 입력 후 엔터", 
+            placeholder_text = "정답을 입력하세요" if not st.session_state.get('gave_up_mode', False) else "위 정답을 똑같이 입력하세요"
+            st.text_input("정답 입력:", value=default_val, key=input_key, label_visibility="collapsed", placeholder=placeholder_text, 
                           on_change=check_answer_callback, args=(username, curr_q, target, today))
             
-            # [NEW] 포기(Pass) 버튼 추가
-            st.write("")
-            if st.button("🤷‍♂️ 정답을 모르겠어요 (Pass)", type="secondary", use_container_width=True, 
-                         on_click=give_up_callback, args=(username, curr_q, today)):
-                pass
+            # [NEW] 포기(Pass) 버튼 추가 (포기 모드가 아닐 때만 표시)
+            if not st.session_state.get('gave_up_mode', False):
+                st.write("")
+                if st.button("🤷‍♂️ 정답을 모르겠어요 (Pass)", type="secondary", use_container_width=True, 
+                             on_click=give_up_callback, args=(username, curr_q, today)):
+                    pass
                 
             utils.focus_element("input")
 
