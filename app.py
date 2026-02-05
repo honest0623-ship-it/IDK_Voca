@@ -1191,83 +1191,87 @@ def show_quiz_page():
     # TTS 오디오 가져오기 (파일이 없으면 생성)
         audio_data = utils.text_to_speech(curr_q['id'], curr_q['sentence_en'])
         
-        # [MOBILE OPTIMIZATION] CSS & Layout (Revised for Max Screen Usage)
+        # [MOBILE OPTIMIZATION] CSS & Layout (Fixed Scrolling & Layout)
         st.markdown("""
         <style>
-            /* 기본적으로 숨김 (데스크탑에선 영향 없게) */
+            /* 기본적으로 숨김 */
             .fixed-question-box { display: none; }
             
             @media screen and (max-width: 768px) {
-                /* 1. 상단 헤더 및 여백 제거 */
+                /* 헤더 숨김 */
                 header { display: none !important; }
                 .block-container {
-                    padding-top: 0 !important;
-                    padding-bottom: 0 !important;
+                    padding: 0 !important;
+                    margin: 0 !important;
                 }
                 
-                /* 2. 문제 영역 (Top ~ Bottom Input Bar까지 꽉 채움) */
+                /* Body 스크롤 방지 (내부 스크롤만 허용) */
+                body {
+                    overscroll-behavior: none;
+                }
+
+                /* 1. 문제 영역: 상단 0부터 하단 85px(입력창 위)까지 꽉 채움 */
                 .fixed-question-box {
                     display: block;
                     position: fixed;
                     top: 0;
                     left: 0;
-                    width: 100%;
-                    /* 입력창 높이(80px)만큼 뺀 나머지 전체 */
-                    height: calc(100% - 80px);
+                    right: 0;
+                    bottom: 85px; /* 입력창 높이만큼 남김 */
                     background-color: #ffffff;
                     z-index: 1000;
                     padding: 20px;
-                    padding-top: 60px; /* Pass 버튼 공간 확보 */
-                    overflow-y: auto;
-                    box-sizing: border-box;
+                    padding-top: 60px; /* Pass 버튼 공간 */
+                    padding-bottom: 20px;
+                    
+                    /* 스크롤 필수 설정 */
+                    overflow-y: scroll !important; 
+                    -webkit-overflow-scrolling: touch;
                 }
                 
-                /* 3. 입력창 고정 (화면 최하단) */
+                /* 2. 입력창: 화면 최하단 고정 */
                 div[data-testid="stTextInput"] {
                     position: fixed;
                     bottom: 0 !important;
-                    top: auto !important; /* 위쪽 고정 해제 */
+                    top: auto !important;
                     left: 0;
                     width: 100% !important;
-                    height: 80px;
+                    height: 85px;
                     background-color: #f8f9fa;
                     border-top: 1px solid #ddd;
-                    z-index: 1001;
+                    z-index: 1010; /* 문제 영역보다 위 */
                     padding: 10px 15px;
                     box-sizing: border-box;
+                    display: flex;
+                    align-items: center;
                 }
                 
-                /* 입력창 폰트 및 스타일 */
+                div[data-testid="stTextInput"] > div {
+                    width: 100%;
+                }
+                
                 div[data-testid="stTextInput"] input {
                     font-size: 1.2rem !important;
                     padding: 10px !important;
                     background-color: white !important;
                 }
 
-                /* 4. 데스크탑용 요소 숨기기 */
-                .desktop-only { display: none !important; }
-                
-                /* 5. Pass 버튼 (우측 상단 고정) - 공간 절약 */
-                /* answering 상태일 때만 적용됨 (success일 땐 Next 버튼이 됨) */
+                /* 3. Pass 버튼 (우측 상단) */
                 .stButton button {
                     position: fixed !important;
-                    top: 10px !important;
+                    top: 15px !important;
                     right: 15px !important;
-                    width: auto !important;
-                    z-index: 2001 !important;
-                    background-color: rgba(255, 255, 255, 0.9) !important;
-                    border: 1px solid #ccc !important;
-                    color: #555 !important;
+                    z-index: 2000 !important;
+                    padding: 5px 10px !important;
                     font-size: 0.8rem !important;
-                    padding: 5px 12px !important;
-                    border-radius: 20px !important;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
+                    background: rgba(255,255,255,0.9) !important;
+                    border: 1px solid #999 !important;
+                    border-radius: 15px !important;
+                    color: #333 !important;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.2) !important;
                 }
-                /* Success 화면의 Primary 버튼(다음 문제)은 하단에 고정하고 싶다면? 
-                   일단 Pass 버튼 위주로 최적화. Next 버튼은 아래 로직에서 별도 처리 안하면 우상단 감.
-                   Next 버튼은 큼직하게 누르기 편해야 하므로... 
-                   하지만 일단 "answering" 상태의 input focus 시점이 중요하므로 이대로 진행.
-                */
+
+                .desktop-only { display: none !important; }
             }
         </style>
         """, unsafe_allow_html=True)
