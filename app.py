@@ -228,47 +228,12 @@ def check_answer_callback(username, curr_q, target, today):
             st.session_state.quiz_state = "success"
             st.session_state.last_result = "correct"
         else:
-            # 오답 시 로직 변경: 바로 틀림 처리하지 않고 재시도 기회 부여 (Typos friendly)
-            # [NEW] 단, 오답 기록은 남겨서 나중에 복습하도록 함 (사용자 요청)
-            if st.session_state.is_first_attempt:
-                st.session_state.is_first_attempt = False
-                
-                # 1. 오답 리스트 추가 (중복 방지)
-                if 'wrong_answers' not in st.session_state: st.session_state.wrong_answers = []
-                already_in = any(w['id'] == curr_q['id'] for w in st.session_state.wrong_answers)
-                if not already_in:
-                    st.session_state.wrong_answers.append(curr_q)
-                
-                # 2. 정규 모드일 경우: 학습 로그(0) 및 스케줄(Fail) 기록
-                if st.session_state.get("quiz_mode") == "normal":
-                    # Log
-                    if 'study_log_buffer' not in st.session_state: st.session_state.study_log_buffer = []
-                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    st.session_state.study_log_buffer.append([
-                        timestamp, str(today), int(curr_q['id']), username, int(curr_q['level']), 0
-                    ])
-                    
-                    # Schedule
-                    if 'user_progress_df' not in st.session_state:
-                         st.session_state.user_progress_df = utils.load_user_progress(username)
-                    st.session_state.user_progress_df = utils.update_schedule(curr_q['id'], False, st.session_state.user_progress_df, today)
-
-                    # Pending Wrongs (DB Sync)
-                    if 'pending_wrongs_local' not in st.session_state: st.session_state.pending_wrongs_local = set()
-                    st.session_state.pending_wrongs_local.add(curr_q['id'])
-                    # [FIX] 즉시 DB 동기화
-                    new_wrongs_str = ",".join(str(x) for x in st.session_state.pending_wrongs_local)
-                    utils.update_user_dynamic_fields(username, {'pending_wrongs': new_wrongs_str})
-                    
-                    # Pending Session (완료 처리)
-                    if 'pending_session_local' not in st.session_state: st.session_state.pending_session_local = set()
-                    if curr_q['id'] in st.session_state.pending_session_local:
-                        st.session_state.pending_session_local.remove(curr_q['id'])
-                        new_session_str = ",".join(str(x) for x in st.session_state.pending_session_local)
-                        utils.update_user_dynamic_fields(username, {'pending_session': new_session_str})
-
+            # [CHANGE] 오타 허용: 틀려도 바로 오답 처리하지 않고 재시도 기회 부여
+            # 'Pass(모름)' 버튼을 누르기 전까지는 계속 시도 가능하며, 맞추면 정답으로 인정
+            
+            # 힌트 표시 등을 위한 모드 전환
             st.session_state.retry_mode = True
-            st.session_state.last_wrong_input = user_input # [NEW] 오답 내용 보존
+            st.session_state.last_wrong_input = user_input
 
 def give_up_callback(username, curr_q, today):
     """모름/포기 버튼 클릭 시 처리"""
@@ -568,38 +533,13 @@ def handle_session_end(username, progress_df, today):
         st.session_state.quiz_mode = "wrong_review"
         st.rerun()
 
-    _, col, _ = st.columns([1, 2, 1])
-    with col:
-        st.balloons()
-        with st.container(border=True):
-                st.markdown("<h2 style='text-align: center;'>🎉 세트 완료!</h2>", unsafe_allow_html=True)
-                st.markdown("<p style='text-align: center; color: gray;'>수고하셨습니다!</p>", unsafe_allow_html=True)
-                
-                if st.button(f"🔥 {batch_size}문제 더 도전!", type="primary", use_container_width=True):
-                    if 'quiz_list_offset' not in st.session_state: st.session_state.quiz_list_offset = batch_size
-                    offset = st.session_state.quiz_list_offset
-                    
-                    if offset < len(st.session_state.full_quiz_list):
-                        next_batch = st.session_state.full_quiz_list[offset : offset + batch_size]
-                        st.session_state.quiz_list = next_batch
-                        st.session_state.quiz_list_offset += batch_size
-                        st.session_state.current_idx = 0
-                        st.session_state.retry_mode = False
-                        st.session_state.is_first_attempt = True
-                        st.session_state.quiz_state = "answering"
-                        st.session_state.quiz_mode = "normal"
-                        st.rerun()
-                    else:
-                        # 더 이상 문제가 없으면 초기화
-                        keys_to_delete = ['full_quiz_list', 'quiz_list', 'current_idx', 'wrong_answers', 'quiz_list_offset']
-                        for k in keys_to_delete:
-                            if k in st.session_state: del st.session_state[k]
-                        st.rerun()
+    # [CHANGE] 세트 완료 화면 생략하고 바로 대시보드로 이동
+    keys_to_delete = ['full_quiz_list', 'quiz_list', 'current_idx', 'wrong_answers', 'quiz_list_offset']
+    for k in keys_to_delete:
+        if k in st.session_state: del st.session_state[k]
 
-                st.write("")
-                if st.button("🏠 대시보드로 돌아가기", use_container_width=True):
-                    st.session_state.page = 'dashboard'
-                    st.rerun()
+    st.session_state.page = 'dashboard'
+    st.rerun()
 
 def show_login_page():
     # [NEW] 가입 완료 팝업 모드
