@@ -651,21 +651,21 @@ def evaluate_level_update(current_level, correct_count, total_questions, fail_st
     next_streak = fail_streak
     next_shield = level_shield
 
-    # 1. [초고속 승급] 95점 이상 (19~20개) -> 2단계 점프
+    # 1. [초고속 승급] 95점 이상 (48~50개) -> 2단계 점프
     if score_percent >= 95:
         change = 2
         next_streak = 0
         next_shield = 3 # 새 레벨 쉴드 충전
         message = "완벽해요! 실력이 압도적이라 2단계 승급합니다! 🚀"
 
-    # 2. [승급] 80점 이상 (16~18개) -> 1단계 상승
+    # 2. [승급] 80점 이상 (40~47개) -> 1단계 상승
     elif score_percent >= 80:
         change = 1
         next_streak = 0
         next_shield = 3 # 새 레벨 쉴드 충전
         message = "참 잘했어요! 다음 레벨로 올라갑니다. 🎉"
 
-    # 3. [유지] 60점 ~ 79점 (12~15개) -> 현상 유지
+    # 3. [유지] 60점 ~ 79점 (30~39개) -> 현상 유지
     elif score_percent >= 60:
         change = 0
         next_streak = 0 # 중간만 가도 경고 초기화
@@ -674,7 +674,7 @@ def evaluate_level_update(current_level, correct_count, total_questions, fail_st
             next_shield -= 1
         message = "수고했어요. 현재 레벨을 유지하며 실력을 다져봅시다."
 
-    # 4. [하향 위기] 60점 미만 (11개 이하)
+    # 4. [하향 위기] 60점 미만 (29개 이하)
     else:
         change = 0
         # A. 쉴드 확인
