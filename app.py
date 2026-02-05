@@ -171,7 +171,22 @@ def main():
             elif st.session_state.get('page') == 'quiz':
                 show_quiz_page()
             else:
-                show_dashboard_page()
+                # [NEW] 중단된 세션 자동 복구 (페이지 새로고침/재로그인 시 퀴즈로 복귀)
+                # 단, 사용자가 명시적으로 홈 버튼을 누른 경우 등을 고려하여 'manual_nav' 체크 필요할 수 있으나
+                # 여기서는 로그인/초기진입 시점을 타겟팅.
+                
+                # pending_session이 있고, 아직 복구 시도를 안 했으며, 현재 페이지가 대시보드(기본)일 때
+                if user_info and user_info.get('pending_session') and str(user_info.get('pending_session')).strip():
+                     # 단순히 여기로 리다이렉트하면 홈으로 가고 싶을 때 못 갈 수 있음.
+                     # 따라서 세션 상태에 'session_restored' 플래그를 두어 1회만 실행
+                     if not st.session_state.get('session_restored', False):
+                        st.session_state.page = 'quiz'
+                        st.session_state.session_restored = True
+                        st.rerun()
+                     else:
+                        show_dashboard_page()
+                else:
+                    show_dashboard_page()
 
 # --- 콜백 (화면 상태 변경) ---
 def check_answer_callback(username, curr_q, target, today):
@@ -210,13 +225,11 @@ def check_answer_callback(username, curr_q, target, today):
 
             # [FIX] (D) 통계 왜곡 방지: 정규 학습(normal) 모드일 때만 평가용 로그 기록
             if st.session_state.is_first_attempt and st.session_state.get("quiz_mode") == "normal":
-                # 학습 로그 버퍼링
-                if 'study_log_buffer' not in st.session_state: st.session_state.study_log_buffer = []
+                # [CHANGE] 즉시 DB 저장 (중단 시 데이터 유실 방지)
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 # 로그 포맷: [timestamp, date, word_id, username, level, is_correct]
-                st.session_state.study_log_buffer.append([
-                    timestamp, str(today), int(curr_q['id']), username, int(curr_q['level']), 1
-                ])
+                row = [timestamp, str(today), int(curr_q['id']), username, int(curr_q['level']), 1]
+                utils.batch_log_study_results([row]) # 버퍼링 없이 즉시 저장
 
             # [속도 개선] 메모리 상의 progress_df 사용
             if 'user_progress_df' not in st.session_state:
@@ -224,6 +237,8 @@ def check_answer_callback(username, curr_q, target, today):
             
             if st.session_state.is_first_attempt and st.session_state.get("quiz_mode") == "normal":
                 st.session_state.user_progress_df = utils.update_schedule(curr_q['id'], True, st.session_state.user_progress_df, today)
+                # [CHANGE] 진도표도 즉시 저장
+                utils.save_progress_fast(username, st.session_state.user_progress_df)
             
             st.session_state.quiz_state = "success"
             st.session_state.last_result = "correct"
@@ -242,11 +257,10 @@ def give_up_callback(username, curr_q, today):
     if st.session_state.is_first_attempt:
         # 1. 학습 로그 (오답=0) - [FIX] (D) 정규 모드일 때만 기록
         if st.session_state.get("quiz_mode") == "normal":
-            if 'study_log_buffer' not in st.session_state: st.session_state.study_log_buffer = []
+            # [CHANGE] 즉시 DB 저장
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            st.session_state.study_log_buffer.append([
-                timestamp, str(today), int(curr_q['id']), username, int(curr_q['level']), 0
-            ])
+            row = [timestamp, str(today), int(curr_q['id']), username, int(curr_q['level']), 0]
+            utils.batch_log_study_results([row])
         
         # 2. 오답 노트 추가
         if 'pending_wrongs_local' not in st.session_state: st.session_state.pending_wrongs_local = set()
@@ -270,6 +284,8 @@ def give_up_callback(username, curr_q, today):
             
         if st.session_state.get("quiz_mode") == "normal":
             st.session_state.user_progress_df = utils.update_schedule(curr_q['id'], False, st.session_state.user_progress_df, today)
+            # [CHANGE] 진도표 즉시 저장
+            utils.save_progress_fast(username, st.session_state.user_progress_df)
         
     # 5. 오답 리스트 추가 (재학습용) - 중복 방지
     if 'wrong_answers' not in st.session_state: st.session_state.wrong_answers = []
