@@ -27,7 +27,12 @@ def init_db():
             username TEXT PRIMARY KEY,
             password TEXT NOT NULL,
             name TEXT,
-            level INTEGER DEFAULT 1
+            level INTEGER DEFAULT 1,
+            fail_streak INTEGER DEFAULT 0,
+            level_shield INTEGER DEFAULT 3,
+            qs_count INTEGER DEFAULT 0,
+            pending_wrongs TEXT DEFAULT '',
+            pending_session TEXT DEFAULT ''
         )
     ''')
 
@@ -79,12 +84,53 @@ def init_db():
     ''')
     c.execute('CREATE INDEX IF NOT EXISTS idx_log_username ON study_log (username)')
 
+    # 5. config
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS config (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    ''')
 
     conn.commit()
     conn.close()
     st.info(f"데이터베이스 '{DB_FILE}'가 생성되었습니다.")
 
 # --- 데이터 읽기 함수 ---
+
+def get_system_config():
+    """시스템 설정 로드"""
+    conn = get_db_connection()
+    try:
+        # DB에 테이블이 있는지 확인 (마이그레이션 전일 수 있음)
+        # 하지만 init_db가 호출되면 생성됨.
+        rows = conn.execute('SELECT key, value FROM config').fetchall()
+        config = {row['key']: row['value'] for row in rows}
+        
+        # 기본값 병합
+        defaults = {'signup_code': '', 'admin_pw': ''}
+        for k, v in defaults.items():
+            if k not in config:
+                config[k] = v
+        return config
+    except Exception as e:
+        print(f"Error loading config: {e}")
+        return {'signup_code': '', 'admin_pw': ''}
+    finally:
+        conn.close()
+
+def update_system_config(key, value):
+    """시스템 설정 업데이트"""
+    conn = get_db_connection()
+    try:
+        conn.execute('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)', (key, value))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error updating config: {e}")
+        return False
+    finally:
+        conn.close()
 
 @st.cache_data(ttl=60)
 def load_all_vocab():
@@ -145,7 +191,7 @@ def register_user(username, password, name):
     conn = get_db_connection()
     try:
         conn.execute(
-            'INSERT INTO users (username, password, name, level) VALUES (?, ?, ?, ?)',
+            'INSERT INTO users (username, password, name, level, fail_streak, level_shield, qs_count, pending_wrongs, pending_session) VALUES (?, ?, ?, ?, 0, 3, 0, "", "")',
             (username, password, name, 1) # 기본 레벨 1
         )
         conn.commit()
@@ -155,6 +201,86 @@ def register_user(username, password, name):
     except Exception as e:
         print(f"Error registering user: {e}")
         return "ERROR"
+    finally:
+        conn.close()
+
+def update_user_dynamic_fields(username, updates):
+    """
+    사용자 동적 필드 업데이트
+    updates: dict of {'col_name': value}
+    Available cols: level, fail_streak, level_shield, qs_count, pending_wrongs, pending_session
+    """
+    conn = get_db_connection()
+    try:
+        # 허용된 컬럼만 필터링 (SQL Injection 방지)
+        allowed_cols = ['level', 'fail_streak', 'level_shield', 'qs_count', 'pending_wrongs', 'pending_session']
+        filtered_updates = {k: v for k, v in updates.items() if k in allowed_cols}
+        
+        if not filtered_updates:
+            return False
+
+        set_clause = ", ".join([f"{k} = ?" for k in filtered_updates.keys()])
+        values = list(filtered_updates.values())
+        values.append(username)
+
+        conn.execute(f'UPDATE users SET {set_clause} WHERE username = ?', values)
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error updating user dynamic fields: {e}")
+        return False
+    finally:
+        conn.close()
+
+def update_student_info(old_username, new_username, new_name, new_level):
+    """학생 정보 수정 (ID, 이름, 레벨)"""
+    conn = get_db_connection()
+    try:
+        # 1. ID 중복 체크 (ID가 변경된 경우)
+        if old_username != new_username:
+            exists = conn.execute('SELECT 1 FROM users WHERE username = ?', (new_username,)).fetchone()
+            if exists:
+                return "DUPLICATE"
+
+        # 2. 업데이트 실행
+        # SQLite에서는 PK 업데이트 시 Cascade 옵션이 없으면 자식 테이블 참조가 깨질 수 있음.
+        # 따라서 PRAGMA foreign_keys = ON; 을 켜거나, 수동으로 자식 테이블도 업데이트해야 함.
+        # 여기서는 수동 업데이트 방식을 사용 (안전하게)
+        
+        conn.execute("BEGIN TRANSACTION")
+        
+        if old_username != new_username:
+            # 새 유저 생성 (기존 정보 복사)
+            user_row = conn.execute('SELECT * FROM users WHERE username = ?', (old_username,)).fetchone()
+            if not user_row:
+                return "NOT_FOUND"
+                
+            user_data = dict(user_row)
+            user_data['username'] = new_username
+            user_data['name'] = new_name
+            user_data['level'] = new_level
+            
+            # 새 레코드로 삽입
+            cols = ', '.join(user_data.keys())
+            placeholders = ', '.join(['?'] * len(user_data))
+            conn.execute(f'INSERT INTO users ({cols}) VALUES ({placeholders})', list(user_data.values()))
+            
+            # 자식 테이블 업데이트 (username 참조 변경)
+            conn.execute('UPDATE user_progress SET username = ? WHERE username = ?', (new_username, old_username))
+            conn.execute('UPDATE study_log SET username = ? WHERE username = ?', (new_username, old_username))
+            
+            # 기존 레코드 삭제
+            conn.execute('DELETE FROM users WHERE username = ?', (old_username,))
+        else:
+            # ID 변경 없음
+            conn.execute('UPDATE users SET name = ?, level = ? WHERE username = ?', (new_name, new_level, old_username))
+            
+        conn.commit()
+        return "SUCCESS"
+    except Exception as e:
+        conn.rollback()
+        print(f"Error updating student info: {e}")
+        return f"UPDATE_ERROR: {e}"
     finally:
         conn.close()
 
@@ -245,5 +371,99 @@ def update_vocab_stats(updates):
         conn.commit()
     except Exception as e:
         print(f"Error updating vocab stats: {e}")
+    finally:
+        conn.close()
+
+def batch_update_vocab_levels(updates):
+    """
+    단어 레벨 일괄 업데이트
+    updates: list of (new_level, word_id)
+    """
+    conn = get_db_connection()
+    try:
+        c = conn.cursor()
+        c.executemany(
+            'UPDATE voca_db SET level = ? WHERE id = ?',
+            updates
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error updating vocab levels: {e}")
+        return False
+    finally:
+        conn.close()
+
+def delete_student(username):
+    """학생 삭제 (관련 기록 Cascade 삭제)"""
+    conn = get_db_connection()
+    try:
+        conn.execute("BEGIN TRANSACTION")
+        conn.execute('DELETE FROM user_progress WHERE username = ?', (username,))
+        conn.execute('DELETE FROM study_log WHERE username = ?', (username,))
+        conn.execute('DELETE FROM users WHERE username = ?', (username,))
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        print(f"Error deleting student: {e}")
+        return False
+    finally:
+        conn.close()
+
+def add_word(target_word, meaning, level, sentence_en, sentence_ko, root_word):
+    """단어 추가"""
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            '''INSERT INTO voca_db (target_word, meaning, level, sentence_en, sentence_ko, root_word) 
+               VALUES (?, ?, ?, ?, ?, ?)''',
+            (target_word, meaning, level, sentence_en, sentence_ko, root_word)
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error adding word: {e}")
+        return False
+    finally:
+        conn.close()
+
+def update_word(word_id, target_word, meaning, level, sentence_en, sentence_ko, root_word):
+    """단어 수정"""
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            '''UPDATE voca_db 
+               SET target_word=?, meaning=?, level=?, sentence_en=?, sentence_ko=?, root_word=?
+               WHERE id=?''',
+            (target_word, meaning, level, sentence_en, sentence_ko, root_word, word_id)
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error updating word: {e}")
+        return False
+    finally:
+        conn.close()
+
+def delete_word(word_id):
+    """단어 삭제 (관련 학습 기록도 삭제 고려)"""
+    conn = get_db_connection()
+    try:
+        conn.execute("BEGIN TRANSACTION")
+        # 1. 단어 삭제
+        conn.execute('DELETE FROM voca_db WHERE id = ?', (word_id,))
+        # 2. 관련 진행 기록 삭제 (참조 무결성)
+        conn.execute('DELETE FROM user_progress WHERE word_id = ?', (word_id,))
+        # 3. 로그는 남길지 말지 고민이나, 보통은 로그도 지우거나 NULL 처리. 여기선 그냥 둠 (통계용)
+        # 하지만 word_id가 사라지면 join이 안되므로 사실상 고아 레코드. 
+        # 깔끔하게 지우거나, study_log에 word_text 컬럼을 둬야 하는데 구조 변경은 큼.
+        # 일단 진행 기록만 삭제.
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        print(f"Error deleting word: {e}")
+        return False
     finally:
         conn.close()

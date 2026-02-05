@@ -11,22 +11,7 @@ import io
 import re
 import random
 import calendar
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-
-# --- 1. 구글 시트 연결 설정 ---
-SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-
-try:
-    gcp_info = dict(st.secrets["gcp_service_account"])
-    if "private_key" in gcp_info:
-        gcp_info["private_key"] = gcp_info["private_key"].replace("\n", "\n")
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(gcp_info, SCOPE)
-    client = gspread.authorize(creds)
-except Exception as e:
-    client = None
-
-SHEET_NAME = "Voca_DB"
+import database as db
 
 # --- 2. 기본 상수 설정 ---
 LEVEL_UP_INTERVAL_DAYS = 7
@@ -125,80 +110,15 @@ def read_sheet_to_df(tab_name, use_cache: bool = True):
 # --- [NEW] 시스템 설정 관리 (Config) ---
 @st.cache_data(ttl=60)
 def get_system_config():
-    """
-    구글 시트 'config' 탭에서 설정을 읽어옴.
-    없으면 탭을 생성하고 기본값 저장.
-    반환: {'signup_code': '...', 'admin_pw': '...'}
-    """
-    default_config = {
-        'signup_code': '',
-        'admin_pw': ''
-    }
-    
-    # 1. 시트 읽기
-    df = read_sheet_to_df('config', use_cache=False)
-    
-    # 2. 데이터가 없으면 초기화
-    if df.empty or 'key' not in df.columns:
-        init_config_sheet(default_config)
-        return default_config
-    
-    # 3. 딕셔너리로 변환
-    config_dict = {}
-    try:
-        for _, row in df.iterrows():
-            config_dict[row['key']] = row['value']
-    except:
-        return default_config
-        
-    # 필수 키가 없으면 기본값 병합
-    for k, v in default_config.items():
-        if k not in config_dict:
-            config_dict[k] = v
-            
-    return config_dict
-
-def init_config_sheet(default_config):
-    """config 시트 초기화"""
-    try:
-        sh = _get_spreadsheet()
-        try:
-            ws = sh.worksheet('config')
-            ws.clear()
-        except:
-            ws = sh.add_worksheet(title='config', rows=20, cols=2)
-            
-        # 헤더 및 기본 데이터 쓰기
-        data = [['key', 'value']]
-        for k, v in default_config.items():
-            data.append([k, v])
-        ws.update(data)
-    except Exception as e:
-        print(f"Config Init Error: {e}")
+    """시스템 설정 가져오기 (SQLite)"""
+    return db.get_system_config()
 
 def update_system_config(key, new_value):
-    """설정값 업데이트 (시트 전체 갱신 방식)"""
-    current = get_system_config()
-    current[key] = new_value
-    
-    try:
-        sh = _get_spreadsheet()
-        try:
-            ws = sh.worksheet('config')
-        except:
-            ws = sh.add_worksheet(title='config', rows=20, cols=2)
-        
-        ws.clear()
-        data = [['key', 'value']]
-        for k, v in current.items():
-            data.append([k, v])
-        ws.update(data)
-        
+    """설정값 업데이트 (SQLite)"""
+    if db.update_system_config(key, new_value):
         st.cache_data.clear() # 캐시 초기화
         return True
-    except Exception as e:
-        st.error(f"설정 저장 실패: {e}")
-        return False
+    return False
 
 # --- 4. 보안 및 시간 함수 ---
 def make_hashes(password):
@@ -226,312 +146,47 @@ def _add_months(date_obj, months: int):
 @st.cache_data(ttl=60)
 @st.cache_data(ttl=600, show_spinner=False)
 def load_data():
-    """voca_db 로딩 (빈번한 재조회 방지: 10분 캐시)"""
-    df = read_sheet_to_df('voca_db')
-    if df.empty:
-        return None
-
-    required_cols = [
-        'id', 'target_word', 'meaning', 'level', 'sentence_en', 'sentence_ko',
-        'root_word', 'total_try', 'total_wrong'
-    ]
-    for col in required_cols:
-        if col not in df.columns:
-            if col in ['total_try', 'total_wrong', 'level', 'id']:
-                df[col] = 0
-            else:
-                df[col] = ''
-
-    df['level'] = pd.to_numeric(df['level'], errors='coerce').fillna(1).astype(int)
-    df['id'] = pd.to_numeric(df['id'], errors='coerce').fillna(0).astype(int)
-    return df
-
+    """voca_db 로딩 (SQLite)"""
+    return db.load_all_vocab()
 
 def load_user_progress(username):
-    """사용자의 학습 진도 로드 (숫자 변환 기능 추가)"""
-    df = read_sheet_to_df('user_progress')
-    
-    # 데이터가 없으면 빈 표 반환
-    if df.empty:
-        return pd.DataFrame(columns=['username', 'word_id', 'last_reviewed', 'next_review', 'interval', 'fail_count'])
-    
-    # 해당 유저 데이터만 필터링
-    user_df = df[df['username'] == username].copy()
-    
-    # 1. 날짜 컬럼 변환 (기존 코드)
-    for col in ['next_review', 'last_reviewed']:
-        if col in user_df.columns:
-            user_df[col] = pd.to_datetime(user_df[col], errors='coerce').dt.date
-            
-    # 2. [추가됨] 숫자 컬럼 변환 (여기가 핵심! ⭐)
-    # interval, fail_count, word_id는 무조건 숫자로 인식하게 만듦
-    for col in ['interval', 'fail_count', 'word_id']:
-        if col in user_df.columns:
-            user_df[col] = pd.to_numeric(user_df[col], errors='coerce').fillna(0).astype(int)
-            
-    return user_df
-
+    """사용자의 학습 진도 로드 (SQLite)"""
+    return db.load_user_progress(username)
 
 def save_progress(username, progress_df):
-    """진도 저장 (재시도 로직 포함)"""
-    for attempt in range(3):
-        try:
-            ws = get_worksheet('user_progress')
-            if not ws: return
-
-            # [FIX] 원본 DF 수정 방지를 위해 복사본 사용
-            df_to_save = progress_df.copy()
-            df_to_save['username'] = username
-            df_to_save['last_reviewed'] = df_to_save['last_reviewed'].astype(str)
-            df_to_save['next_review'] = df_to_save['next_review'].astype(str)
-
-            all_data = ws.get_all_values() # 값만 가져오기 (가벼움) 
-            
-            if len(all_data) > 1:
-                headers = all_data[0]
-                all_df = pd.DataFrame(all_data[1:], columns=headers)
-                other_users_df = all_df[all_df['username'] != username]
-                final_df = pd.concat([other_users_df, df_to_save], ignore_index=True)
-            else:
-                final_df = df_to_save
-
-            ws.clear()
-            ws.update([final_df.columns.values.tolist()] + final_df.values.tolist())
-            bump_sheet_cache_ver()
-            return # 성공하면 종료
-        except Exception as e:
-            if "429" in str(e):
-                time.sleep(2)
-                continue
-            st.error(f"저장 실패: {e}")
-            break
-
-# --- 6. 학습 로그 ---
-
+    """진도 저장 (SQLite)"""
+    return db.save_user_progress(username, progress_df)
 
 def save_progress_fast(username, progress_df):
-    """진도 저장 (속도 개선 버전)
-    - 전체 시트를 clear/update 하지 않고
-    - 해당 username 블록만 삭제 후 append
-    - 삭제 대상 탐색은 username 컬럼만 조회(전송량 감소)
-    """
-    for attempt in range(3):
-        try:
-            ws = get_worksheet('user_progress')
-            if not ws:
-                return
-
-            df = progress_df.copy()
-            df['username'] = username
-            for col in ['last_reviewed', 'next_review']:
-                if col in df.columns:
-                    df[col] = df[col].astype(str)
-
-            # 1) 헤더 로딩/보정
-            original_headers = ws.row_values(1)
-            headers = [str(h).strip() for h in original_headers] if original_headers else []
-            required = ['word_id', 'last_reviewed', 'next_review', 'interval', 'fail_count', 'username']
-            if not headers:
-                headers = required[:]  # 시트가 비어 있으면 기본 헤더 생성
-                ws.append_row(headers, value_input_option='USER_ENTERED')
-            else:
-                changed = False
-                for col in required:
-                    if col not in headers:
-                        headers.append(col)
-                        changed = True
-                if changed:
-                    ws.update('A1', [headers], value_input_option='USER_ENTERED')
-
-            # 2) username 컬럼만 조회해서 기존 행 찾기
-            user_col_idx = headers.index('username') + 1
-            user_col = ws.col_values(user_col_idx)  # header 포함
-            existing_rows = [i for i, val in enumerate(user_col[1:], start=2) if val == username]
-
-            # 3) 기존 행 삭제
-            if existing_rows:
-                if existing_rows == list(range(existing_rows[0], existing_rows[-1] + 1)):
-                    ws.delete_rows(existing_rows[0], existing_rows[-1])
-                else:
-                    for r in sorted(existing_rows, reverse=True):
-                        ws.delete_rows(r)
-
-            # 4) 새 데이터 append
-            out = df.copy()
-            for col in required:
-                if col not in out.columns:
-                    out[col] = 0 if col in ['word_id', 'interval', 'fail_count'] else ''
-            out = out[required]
-            rows_to_append = out.values.tolist()
-
-            if hasattr(ws, 'append_rows'):
-                ws.append_rows(rows_to_append, value_input_option='USER_ENTERED')
-            else:
-                for r in rows_to_append:
-                    ws.append_row(r, value_input_option='USER_ENTERED')
-
-            bump_sheet_cache_ver()
-            return
-
-        except Exception as e:
-            if '429' in str(e):
-                time.sleep(2)
-                continue
-            st.error(f"저장 실패(FAST): {e}")
-            break
+    """진도 저장 (SQLite - Fast Alias)"""
+    return db.save_user_progress(username, progress_df)
 def log_study_result(username, word_id, level, is_correct):
-    for attempt in range(3):
-        try:
-            ws = get_worksheet('study_log')
-            if not ws: return
-            
-            today = get_korea_today()
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            row = [timestamp, str(today), int(word_id), username, int(level), 1 if is_correct else 0]
-            ws.append_row(row)
-            bump_sheet_cache_ver()
-            return
-        except Exception as e:
-            if "429" in str(e):
-                time.sleep(2)
-                continue
-            print(f"Log Error: {e}")
-            break
+    today = get_korea_today()
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    row = [timestamp, str(today), int(word_id), username, int(level), 1 if is_correct else 0]
+    db.batch_log_study_results([row])
 
 
 def batch_log_study_results(rows):
-    """학습 로그를 여러 행 한 번에 append (속도 개선)"""
-    if not rows:
-        return
-    for attempt in range(3):
-        try:
-            ws = get_worksheet('study_log')
-            if not ws:
-                return
-            # gspread 버전에 따라 append_rows가 없을 수 있어 fallback 제공
-            if hasattr(ws, "append_rows"):
-                ws.append_rows(rows, value_input_option='USER_ENTERED')
-            else:
-                for r in rows:
-                    ws.append_row(r)
-            return
-        except Exception as e:
-            if "429" in str(e):
-                time.sleep(2)
-                continue
-            print(f"Batch Log Error: {e}")
-            break
+    """학습 로그를 여러 행 한 번에 append (SQLite)"""
+    return db.batch_log_study_results(rows)
 
 
 def load_study_log(username):
-    df = read_sheet_to_df('study_log')
-    if df.empty:
-        return pd.DataFrame()
-
-    # 컬럼 보정
-    for col in ['timestamp', 'date', 'word_id', 'username', 'level', 'is_correct']:
-        if col not in df.columns:
-            df[col] = None
-
-    df = df[df['username'] == username].copy()
-
-    df['date'] = pd.to_datetime(df['date'], errors='coerce').dt.date
-    df['word_id'] = pd.to_numeric(df['word_id'], errors='coerce')
-    df['level'] = pd.to_numeric(df['level'], errors='coerce')
-    df['is_correct'] = pd.to_numeric(df['is_correct'], errors='coerce')
-
-    df = df.dropna(subset=['date'])
-    df['word_id'] = df['word_id'].fillna(0).astype(int)
-    df['level'] = df['level'].fillna(0).astype(int)
-    df['is_correct'] = df['is_correct'].fillna(0).astype(int)
-
-    return df
+    """사용자 학습 로그 로드 (SQLite)"""
+    return db.load_study_log(username)
 
 def get_all_study_logs():
-    """모든 학습 로그 로드 (관리자용 - 전체 유저)"""
-    df = read_sheet_to_df('study_log')
-    if df.empty:
-        return pd.DataFrame()
-
-    # 컬럼 보정
-    for col in ['timestamp', 'date', 'word_id', 'username', 'level', 'is_correct']:
-        if col not in df.columns:
-            df[col] = None
-
-    # 날짜 및 숫자 변환
-    df['date'] = pd.to_datetime(df['date'], errors='coerce').dt.date
-    df['word_id'] = pd.to_numeric(df['word_id'], errors='coerce')
-    df['level'] = pd.to_numeric(df['level'], errors='coerce')
-    df['is_correct'] = pd.to_numeric(df['is_correct'], errors='coerce')
-
-    df = df.dropna(subset=['date'])
-    df['word_id'] = df['word_id'].fillna(0).astype(int)
-    df['level'] = df['level'].fillna(0).astype(int)
-    df['is_correct'] = df['is_correct'].fillna(0).astype(int)
-
-    return df
+    """모든 학습 로그 로드 (관리자용 - SQLite)"""
+    return db.get_all_study_logs()
 
 def get_all_users():
-    """모든 사용자 정보 로드 (관리자용)"""
-    df = read_sheet_to_df('users')
-    if df.empty:
-        return pd.DataFrame(columns=['username', 'name', 'level'])
-    
-    # 필수 컬럼 보장
-    for col in ['username', 'name', 'level']:
-        if col not in df.columns:
-            df[col] = ''
-            
-    return df
+    """모든 사용자 정보 로드 (관리자용 - SQLite)"""
+    return db.get_all_users()
 
 def get_user_info(username):
-    df = read_sheet_to_df('users')
-    if df.empty: return None
-    
-    # [CASE-INSENSITIVE] 입력받은 ID를 소문자로 변환
-    username = username.lower().strip()
-    
-    # DB의 username도 소문자로 변환하여 비교 (데이터 정합성 보장)
-    # 벡터화 연산을 위해 임시 시리즈 생성
-    if 'username' in df.columns:
-        # DB에 저장된 값들도 소문자로 비교
-        match = df[df['username'].astype(str).str.lower() == username]
-        if not match.empty:
-            user_row = match.iloc[0]
-            # ... (나머지 로직 유지)
-            lv = user_row.get('level', '')
-            
-            # [MODIFIED] 레벨 미설정(신규) 유저 구분을 위해 기본값을 None으로 변경
-            final_lv = None
-            if lv is not None and str(lv).strip() != "":
-                try:
-                    final_lv = int(float(lv))
-                except:
-                    final_lv = None 
-            
-            # Helper to safely get int (Restored)
-            def _safe_int(val, default):
-                try: return int(float(val))
-                except: return default
-    
-            # Read new fields
-            fail_streak = _safe_int(user_row.get('fail_streak'), 0)
-            level_shield = _safe_int(user_row.get('level_shield'), 3)
-            qs_count = _safe_int(user_row.get('qs_count'), 0)
-            pending_wrongs = str(user_row.get('pending_wrongs', ''))
-            pending_session = str(user_row.get('pending_session', ''))
-    
-            return {
-                'level': final_lv, 
-                'name': user_row['name'], 
-                'password': user_row['password'],
-                'fail_streak': fail_streak,
-                'level_shield': level_shield,
-                'qs_count': qs_count,
-                'pending_wrongs': pending_wrongs,
-                'pending_session': pending_session
-            }
-    return None
+    """사용자 정보 가져오기 (SQLite)"""
+    return db.get_user_info(username)
 
 def manage_session_state(username, action, data):
     """
@@ -586,58 +241,8 @@ def manage_pending_wrongs(username, action, word_id):
         update_user_dynamic_fields(username, {'pending_wrongs': new_str})
 
 def update_user_dynamic_fields(username, updates):
-    """
-    updates: dict of {'col_name': value}
-    Available cols: level, fail_streak, level_shield, qs_count
-    """
-    for attempt in range(3):
-        try:
-            ws = get_worksheet('users')
-            if not ws: return False
-
-            # 1. 헤더 확인 및 추가
-            headers = ws.row_values(1)
-            header_map = {h: i+1 for i, h in enumerate(headers)}
-            
-            new_headers = []
-            for col in updates.keys():
-                if col not in header_map:
-                    new_headers.append(col)
-            
-            if new_headers:
-                # 헤더 추가
-                ws.update_cell(1, len(headers) + 1, new_headers[0]) # 하나씩 추가 (단순화)
-                # 캐시 무효화 후 재귀 호출로 다시 시도 (헤더 갱신 위해)
-                bump_sheet_cache_ver()
-                if len(new_headers) > 1:
-                     # 여러개면 recursive하게 처리하거나 그냥 루프
-                     pass 
-                return update_user_dynamic_fields(username, updates)
-
-            # 2. 유저 행 찾기
-            cell = ws.find(username, in_column=1)
-            if not cell: return False
-            
-            # 3. 값 업데이트
-            # gspread batch update is better but cell update is simpler for now
-            # We use a list of cells to update for atomicity if possible, but update_cells requires Cell objects
-            # Let's just update one by one for reliability or construct a range
-            
-            cells_to_update = []
-            for col, val in updates.items():
-                col_idx = header_map[col]
-                ws.update_cell(cell.row, col_idx, val)
-                
-            bump_sheet_cache_ver()
-            return True
-
-        except Exception as e:
-            if "429" in str(e):
-                time.sleep(2)
-                continue
-            print(f"Update User Fields Error: {e}")
-            break
-    return False
+    """사용자 동적 필드 업데이트 (SQLite)"""
+    return db.update_user_dynamic_fields(username, updates)
 
 def evaluate_level_update(current_level, correct_count, total_questions, fail_streak, level_shield, max_level=30):
     """
@@ -651,21 +256,21 @@ def evaluate_level_update(current_level, correct_count, total_questions, fail_st
     next_streak = fail_streak
     next_shield = level_shield
 
-    # 1. [초고속 승급] 95점 이상 (48~50개) -> 2단계 점프
+    # 1. [초고속 승급] 95점 이상 (19~20개) -> 2단계 점프
     if score_percent >= 95:
         change = 2
         next_streak = 0
         next_shield = 3 # 새 레벨 쉴드 충전
         message = "완벽해요! 실력이 압도적이라 2단계 승급합니다! 🚀"
 
-    # 2. [승급] 80점 이상 (40~47개) -> 1단계 상승
+    # 2. [승급] 80점 이상 (16~18개) -> 1단계 상승
     elif score_percent >= 80:
         change = 1
         next_streak = 0
         next_shield = 3 # 새 레벨 쉴드 충전
         message = "참 잘했어요! 다음 레벨로 올라갑니다. 🎉"
 
-    # 3. [유지] 60점 ~ 79점 (30~39개) -> 현상 유지
+    # 3. [유지] 60점 ~ 79점 (12~15개) -> 현상 유지
     elif score_percent >= 60:
         change = 0
         next_streak = 0 # 중간만 가도 경고 초기화
@@ -674,7 +279,7 @@ def evaluate_level_update(current_level, correct_count, total_questions, fail_st
             next_shield -= 1
         message = "수고했어요. 현재 레벨을 유지하며 실력을 다져봅시다."
 
-    # 4. [하향 위기] 60점 미만 (29개 이하)
+    # 4. [하향 위기] 60점 미만 (11개 이하)
     else:
         change = 0
         # A. 쉴드 확인
@@ -698,83 +303,18 @@ def evaluate_level_update(current_level, correct_count, total_questions, fail_st
     return new_level, next_streak, next_shield, message
 
 def register_user(username, password, name):
-    for attempt in range(3):
-        try:
-            ws = get_worksheet('users')
-            if not ws:
-                return "ERROR"
-
-            # [CASE-INSENSITIVE] 소문자 변환
-            username = username.lower().strip()
-
-            existing_df = read_sheet_to_df('users')
-            
-            # 중복 체크도 소문자 기준
-            if not existing_df.empty and 'username' in existing_df.columns:
-                existing_users = existing_df['username'].astype(str).str.lower().values
-                if username in existing_users:
-                    return "EXIST"
-
-            hashed_pw = make_hashes(password)
-            ws.append_row([username, hashed_pw, name, ""])
-
-            # ✅ 가입 직후 바로 로그인 가능하게 캐시 클리어
-            st.cache_data.clear()
-            bump_sheet_cache_ver()
-            return "SUCCESS"
-
-        except Exception as e:
-            if "429" in str(e):
-                time.sleep(2)
-                continue
-            return "ERROR"
-    return "ERROR"
+    """사용자 등록 (SQLite)"""
+    return db.register_user(username, password, name)
 
 def update_user_level(username, new_level):
-    for attempt in range(3):
-        try:
-            ws = get_worksheet('users')
-            if not ws:
-                return
-
-            cell = ws.find(username, in_column=1)
-            if not cell:
-                st.error("유저를 찾을 수 없습니다.")
-                return
-
-            ws.update_cell(cell.row, 4, new_level)
-            bump_sheet_cache_ver()
-            return
-        except Exception as e:
-            if "429" in str(e):
-                time.sleep(3)
-                continue
-            st.error(f"레벨 업데이트 실패: {e}")
-            break
+    """사용자 레벨 업데이트 (SQLite)"""
+    db.update_user_level(username, new_level)
 
 
 def reset_user_password(username, new_password):
-    for attempt in range(3):
-        try:
-            ws = get_worksheet('users')
-            if not ws:
-                return False
-
-            cell = ws.find(username, in_column=1)
-            if not cell:
-                return False
-
-            hashed_pw = make_hashes(new_password)
-            ws.update_cell(cell.row, 2, hashed_pw)
-            bump_sheet_cache_ver()
-            return True
-        except Exception as e:
-            if "429" in str(e):
-                time.sleep(3)
-                continue
-            st.error(f"비밀번호 초기화 실패: {e}")
-            break
-    return False
+    """비밀번호 초기화 (SQLite)"""
+    hashed_pw = make_hashes(new_password)
+    return db.reset_user_password(username, hashed_pw)
 
 def update_schedule(word_id, is_correct, progress_df, today):
     # 컬럼 보정
@@ -1079,39 +619,11 @@ def adjust_level_based_on_stats():
         
         # DB 업데이트
         if updates:
-            ws = get_worksheet('voca_db')
-            if not ws: return 0, "DB 연결 실패"
-            
-            # Batch Update가 효율적이나, gspread cell 찾기 로직이 필요.
-            # 여기서는 안전하게 하나씩 업데이트하거나, 전체 데이터를 다시 쓰는 방식 고려.
-            # voca_db는 크기가 클 수 있으므로, 변경된 것만 cell update 권장.
-            # 하지만 find 호출이 많으면 느림. -> 전체 다시 쓰기가 나을 수도 있음 (데이터 1000개 미만이면).
-            # 일단 안전하게 cell update 시도 (개수가 적을 것으로 예상).
-            
-            count = 0
-            # 성능을 위해 전체 데이터를 로드해서 메모리에서 수정 후 덮어쓰기 (가장 확실)
-            all_data = ws.get_all_values()
-            headers = all_data[0]
-            id_idx = headers.index('id')
-            lv_idx = headers.index('level')
-            
-            id_map = {int(row[id_idx]): i for i, row in enumerate(all_data) if i > 0 and row[id_idx].isdigit()}
-            
-            changed = False
-            for new_lv, w_id in updates:
-                if w_id in id_map:
-                    row_idx = id_map[w_id]
-                    all_data[row_idx][lv_idx] = str(new_lv)
-                    changed = True
-                    count += 1
-            
-            if changed:
-                ws.update(all_data)
-                bump_sheet_cache_ver()
+            if db.batch_update_vocab_levels(updates):
                 st.cache_data.clear() # 데이터 갱신
-                return count, f"{count}개 단어의 난이도가 재조정되었습니다."
+                return len(updates), f"{len(updates)}개 단어의 난이도가 재조정되었습니다."
             else:
-                return 0, "조정 대상이 없습니다."
+                return 0, "DB 업데이트 실패"
                 
         return 0, "조정 대상이 없습니다."
 
@@ -1120,74 +632,21 @@ def adjust_level_based_on_stats():
         return 0, f"오류 발생: {e}"
 
 def update_student_info(old_username, new_username, new_name, new_level):
-    """학생 정보 수정 (ID, 이름, 레벨)"""
-    # 1. 중복 ID 체크 (ID가 변경된 경우에만)
-    if old_username != new_username:
-        # 소문자 비교
-        new_username = new_username.lower().strip()
-        old_username = old_username.lower().strip()
-        
-        users_df = get_all_users()
-        if not users_df.empty and new_username in users_df['username'].str.lower().values:
-             return "DUPLICATE"
-    else:
-        old_username = old_username.lower().strip()
-        new_username = old_username # Ensure consistency
+    """학생 정보 수정 (ID, 이름, 레벨) - SQLite"""
+    return db.update_student_info(old_username, new_username, new_name, new_level)
 
-    # 2. Users 시트 업데이트
-    try:
-        ws = get_worksheet('users')
-        if not ws: return "DB_ERROR"
-        
-        # [FIX] find는 대소문자를 구분하므로, 전체 컬럼을 가져와서 직접 찾기
-        usernames = ws.col_values(1) # 1번 컬럼(username) 전체 가져오기
-        
-        found_row = -1
-        for i, u in enumerate(usernames):
-            if str(u).strip().lower() == old_username:
-                found_row = i + 1 # 1-based index
-                break
-                
-        if found_row == -1: return "NOT_FOUND"
-        
-        # update_cell(row, col, val)
-        # Col 1: username, Col 3: name, Col 4: level
-        ws.update_cell(found_row, 1, new_username)
-        ws.update_cell(found_row, 3, new_name)
-        ws.update_cell(found_row, 4, new_level)
-        
-    except Exception as e:
-        return f"UPDATE_ERROR: {e}"
+def delete_student(username):
+    """학생 삭제 (관련 기록 Cascade 삭제)"""
+    return db.delete_student(username)
 
-    # 3. ID가 변경되었다면 관련 테이블(Study Log, Progress)도 업데이트
-    if old_username != new_username:
-        _update_related_tables(old_username, new_username)
-        
-    bump_sheet_cache_ver()
-    st.cache_data.clear()
-    return "SUCCESS"
+def add_word(target_word, meaning, level, sentence_en, sentence_ko, root_word):
+    """단어 추가"""
+    return db.add_word(target_word, meaning, level, sentence_en, sentence_ko, root_word)
 
-def _update_related_tables(old_user, new_user):
-    # User Progress
-    try:
-        ws = get_worksheet('user_progress')
-        if ws:
-            headers = ws.row_values(1)
-            if 'username' in headers:
-                col_idx = headers.index('username') + 1
-                cells = ws.findall(old_user, in_column=col_idx)
-                for c in cells: c.value = new_user
-                if cells: ws.update_cells(cells)
-    except: pass
-    
-    # Study Log
-    try:
-        ws = get_worksheet('study_log')
-        if ws:
-            headers = ws.row_values(1)
-            if 'username' in headers:
-                col_idx = headers.index('username') + 1
-                cells = ws.findall(old_user, in_column=col_idx)
-                for c in cells: c.value = new_user
-                if cells: ws.update_cells(cells)
-    except: pass
+def update_word(word_id, target_word, meaning, level, sentence_en, sentence_ko, root_word):
+    """단어 수정"""
+    return db.update_word(word_id, target_word, meaning, level, sentence_en, sentence_ko, root_word)
+
+def delete_word(word_id):
+    """단어 삭제"""
+    return db.delete_word(word_id)

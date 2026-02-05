@@ -7,6 +7,7 @@ import altair as alt
 import utils 
 import streamlit.components.v1 as components
 import time
+import drive_sync # [NEW] 동기화 모듈
 
 # --- 화면 렌더링 함수 (메인 진입점) ---
 def main():
@@ -16,6 +17,16 @@ def main():
         layout="wide", 
         initial_sidebar_state="expanded" 
     )
+
+    # [NEW] 앱 시작 시 DB 복구 (클라우드 배포 대응)
+    # voca.db가 없으면 구글 드라이브에서 가져옴
+    if not os.path.exists("voca.db"):
+        with st.spinner("☁️ 서버 데이터를 동기화 중입니다..."):
+            if drive_sync.download_db_from_drive():
+                st.toast("✅ 데이터 복구 완료!")
+            else:
+                # 드라이브에도 없으면(최초 실행) 그냥 넘어감 (database.py가 생성함)
+                pass
 
     st.markdown("""
         <style>
@@ -174,26 +185,33 @@ def check_answer_callback(username, curr_q, target, today):
                  st.session_state.gave_up_mode = False # 모드 해제
                  return
 
-            if st.session_state.is_first_attempt:
-                # 1. 학습 로그 버퍼링
+            # [FIX] 정답을 맞췄으면 모드와 상관없이 즉시 Pending 목록에서 제거 (무한 루프 방지)
+            
+            # 1. 오답 노트(Pending Wrongs) 제거
+            if 'pending_wrongs_local' not in st.session_state: st.session_state.pending_wrongs_local = set()
+            if curr_q['id'] in st.session_state.pending_wrongs_local:
+                st.session_state.pending_wrongs_local.remove(curr_q['id'])
+                # 즉시 DB 동기화
+                new_wrongs_str = ",".join(str(x) for x in st.session_state.pending_wrongs_local)
+                utils.update_user_dynamic_fields(username, {'pending_wrongs': new_wrongs_str})
+            
+            # 2. 진행 중인 세션(Pending Session) 제거
+            if 'pending_session_local' not in st.session_state: st.session_state.pending_session_local = set()
+            if curr_q['id'] in st.session_state.pending_session_local:
+                st.session_state.pending_session_local.remove(curr_q['id'])
+                # 즉시 DB 동기화
+                new_session_str = ",".join(str(x) for x in st.session_state.pending_session_local)
+                utils.update_user_dynamic_fields(username, {'pending_session': new_session_str})
+
+            # [FIX] (D) 통계 왜곡 방지: 정규 학습(normal) 모드일 때만 평가용 로그 기록
+            if st.session_state.is_first_attempt and st.session_state.get("quiz_mode") == "normal":
+                # 학습 로그 버퍼링
                 if 'study_log_buffer' not in st.session_state: st.session_state.study_log_buffer = []
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 # 로그 포맷: [timestamp, date, word_id, username, level, is_correct]
                 st.session_state.study_log_buffer.append([
                     timestamp, str(today), int(curr_q['id']), username, int(curr_q['level']), 1
                 ])
-                
-                # 2. 오답 노트 관리 (로컬 메모리) - 정답 시 제거
-                if 'pending_wrongs_local' not in st.session_state: st.session_state.pending_wrongs_local = set()
-                if curr_q['id'] in st.session_state.pending_wrongs_local:
-                    st.session_state.pending_wrongs_local.remove(curr_q['id'])
-                
-                # 3. 진행 중인 세션 관리 (로컬 메모리)
-                if 'pending_session_local' not in st.session_state: st.session_state.pending_session_local = set()
-                
-                if st.session_state.get("quiz_mode") == "normal":
-                    if curr_q['id'] in st.session_state.pending_session_local:
-                        st.session_state.pending_session_local.remove(curr_q['id'])
 
             # [속도 개선] 메모리 상의 progress_df 사용
             if 'user_progress_df' not in st.session_state:
@@ -206,37 +224,89 @@ def check_answer_callback(username, curr_q, target, today):
             st.session_state.last_result = "correct"
         else:
             # 오답 시 로직 변경: 바로 틀림 처리하지 않고 재시도 기회 부여 (Typos friendly)
+            # [NEW] 단, 오답 기록은 남겨서 나중에 복습하도록 함 (사용자 요청)
+            if st.session_state.is_first_attempt:
+                st.session_state.is_first_attempt = False
+                
+                # 1. 오답 리스트 추가 (중복 방지)
+                if 'wrong_answers' not in st.session_state: st.session_state.wrong_answers = []
+                already_in = any(w['id'] == curr_q['id'] for w in st.session_state.wrong_answers)
+                if not already_in:
+                    st.session_state.wrong_answers.append(curr_q)
+                
+                # 2. 정규 모드일 경우: 학습 로그(0) 및 스케줄(Fail) 기록
+                if st.session_state.get("quiz_mode") == "normal":
+                    # Log
+                    if 'study_log_buffer' not in st.session_state: st.session_state.study_log_buffer = []
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    st.session_state.study_log_buffer.append([
+                        timestamp, str(today), int(curr_q['id']), username, int(curr_q['level']), 0
+                    ])
+                    
+                    # Schedule
+                    if 'user_progress_df' not in st.session_state:
+                         st.session_state.user_progress_df = utils.load_user_progress(username)
+                    st.session_state.user_progress_df = utils.update_schedule(curr_q['id'], False, st.session_state.user_progress_df, today)
+
+                    # Pending Wrongs (DB Sync)
+                    if 'pending_wrongs_local' not in st.session_state: st.session_state.pending_wrongs_local = set()
+                    st.session_state.pending_wrongs_local.add(curr_q['id'])
+                    # [FIX] 즉시 DB 동기화
+                    new_wrongs_str = ",".join(str(x) for x in st.session_state.pending_wrongs_local)
+                    utils.update_user_dynamic_fields(username, {'pending_wrongs': new_wrongs_str})
+                    
+                    # Pending Session (완료 처리)
+                    if 'pending_session_local' not in st.session_state: st.session_state.pending_session_local = set()
+                    if curr_q['id'] in st.session_state.pending_session_local:
+                        st.session_state.pending_session_local.remove(curr_q['id'])
+                        new_session_str = ",".join(str(x) for x in st.session_state.pending_session_local)
+                        utils.update_user_dynamic_fields(username, {'pending_session': new_session_str})
+
             st.session_state.retry_mode = True
             st.session_state.last_wrong_input = user_input # [NEW] 오답 내용 보존
 
 def give_up_callback(username, curr_q, today):
     """모름/포기 버튼 클릭 시 처리"""
-    # 1. 학습 로그 (오답=0)
-    if 'study_log_buffer' not in st.session_state: st.session_state.study_log_buffer = []
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    st.session_state.study_log_buffer.append([
-        timestamp, str(today), int(curr_q['id']), username, int(curr_q['level']), 0
-    ])
     
-    # 2. 오답 노트 추가
-    if 'pending_wrongs_local' not in st.session_state: st.session_state.pending_wrongs_local = set()
-    st.session_state.pending_wrongs_local.add(curr_q['id'])
-    
-    # 3. 세션 목록에서 제거 (완료됨)
-    if 'pending_session_local' not in st.session_state: st.session_state.pending_session_local = set()
-    if st.session_state.get("quiz_mode") == "normal":
-        if curr_q['id'] in st.session_state.pending_session_local:
-            st.session_state.pending_session_local.remove(curr_q['id'])
+    # [NEW] 이미 check_answer에서 실패 처리된 경우 중복 로깅 방지
+    if st.session_state.is_first_attempt:
+        # 1. 학습 로그 (오답=0) - [FIX] (D) 정규 모드일 때만 기록
+        if st.session_state.get("quiz_mode") == "normal":
+            if 'study_log_buffer' not in st.session_state: st.session_state.study_log_buffer = []
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            st.session_state.study_log_buffer.append([
+                timestamp, str(today), int(curr_q['id']), username, int(curr_q['level']), 0
+            ])
+        
+        # 2. 오답 노트 추가
+        if 'pending_wrongs_local' not in st.session_state: st.session_state.pending_wrongs_local = set()
+        st.session_state.pending_wrongs_local.add(curr_q['id'])
+        # [FIX] 즉시 DB 동기화
+        new_wrongs_str = ",".join(str(x) for x in st.session_state.pending_wrongs_local)
+        utils.update_user_dynamic_fields(username, {'pending_wrongs': new_wrongs_str})
+        
+        # 3. 세션 목록에서 제거 (완료됨)
+        if 'pending_session_local' not in st.session_state: st.session_state.pending_session_local = set()
+        if st.session_state.get("quiz_mode") == "normal":
+            if curr_q['id'] in st.session_state.pending_session_local:
+                st.session_state.pending_session_local.remove(curr_q['id'])
+                # [FIX] 즉시 DB 동기화
+                new_session_str = ",".join(str(x) for x in st.session_state.pending_session_local)
+                utils.update_user_dynamic_fields(username, {'pending_session': new_session_str})
 
-    # 4. 진도표 업데이트 (Fail)
-    if 'user_progress_df' not in st.session_state:
-        st.session_state.user_progress_df = utils.load_user_progress(username)
+        # 4. 진도표 업데이트 (Fail)
+        if 'user_progress_df' not in st.session_state:
+            st.session_state.user_progress_df = utils.load_user_progress(username)
+            
+        if st.session_state.get("quiz_mode") == "normal":
+            st.session_state.user_progress_df = utils.update_schedule(curr_q['id'], False, st.session_state.user_progress_df, today)
         
-    if st.session_state.get("quiz_mode") == "normal":
-        st.session_state.user_progress_df = utils.update_schedule(curr_q['id'], False, st.session_state.user_progress_df, today)
-        
-    # 5. 오답 리스트 추가 (재학습용)
-    st.session_state.wrong_answers.append(curr_q)
+    # 5. 오답 리스트 추가 (재학습용) - 중복 방지
+    if 'wrong_answers' not in st.session_state: st.session_state.wrong_answers = []
+    already_in = any(w['id'] == curr_q['id'] for w in st.session_state.wrong_answers)
+    if not already_in:
+        st.session_state.wrong_answers.append(curr_q)
+
     st.session_state.is_first_attempt = False
     
     # [CHANGE] 정답 공개 후 '따라 치기' 모드로 전환 (바로 넘어가지 않음)
@@ -377,7 +447,8 @@ def handle_session_end(username, progress_df, today):
     with st.spinner("학습 기록을 저장 중입니다..."):
         # 1. 진도표 저장
         if 'user_progress_df' in st.session_state:
-            utils.save_progress(username, st.session_state.user_progress_df)
+            # [FIX] (B) 데이터 유실 방지: 전체 덮어쓰기 대신 해당 유저 데이터만 갱신하는 Fast 버전 사용
+            utils.save_progress_fast(username, st.session_state.user_progress_df)
         
         # 2. 학습 로그 일괄 저장
         if 'study_log_buffer' in st.session_state and st.session_state.study_log_buffer:
@@ -422,22 +493,22 @@ def handle_session_end(username, progress_df, today):
     
     total_qs_accumulated = current_qs_count + session_qs_count
     
-    if total_qs_accumulated >= 50:
+    if total_qs_accumulated >= 20:
         # 평가 진행
-        # 최근 50개 로그 가져오기 (현재 레벨)
+        # 최근 20개 로그 가져오기 (현재 레벨)
         if not study_log_df.empty:
             current_level_logs = study_log_df[study_log_df['level'] == current_level]
-            if len(current_level_logs) >= 50:
-                target_logs = current_level_logs.tail(50)
+            if len(current_level_logs) >= 20:
+                target_logs = current_level_logs.tail(20)
                 correct_count = target_logs['is_correct'].sum()
-                total_q = 50 # 고정
+                total_q = 20 # 고정
                 
                 new_level, new_streak, new_shield, msg = utils.evaluate_level_update(
                     current_level, correct_count, total_q, fail_streak, level_shield
                 )
                 
-                # 나머지 카운트 (55개 풀었으면 5개 남김)
-                remainder_qs = total_qs_accumulated % 50
+                # 나머지 카운트 (25개 풀었으면 5개 남김)
+                remainder_qs = total_qs_accumulated % 20
                 
                 # DB 업데이트
                 updates = {
@@ -461,7 +532,7 @@ def handle_session_end(username, progress_df, today):
                     return # 여기서 중단하고 사용자 반응 대기
                 else:
                     # 레벨 유지 시
-                    st.info(f"📊 레벨 평가 결과: {msg} (다음 평가까지: {50 - remainder_qs}문제)")
+                    st.info(f"📊 레벨 평가 결과: {msg} (다음 평가까지: {20 - remainder_qs}문제)")
             else:
                 # 로그가 부족한 경우 (혹시 모를 예외)
                  utils.update_user_dynamic_fields(username, {'qs_count': total_qs_accumulated})
@@ -471,7 +542,11 @@ def handle_session_end(username, progress_df, today):
     else:
         # 평가 기준 미달 -> 카운트만 누적
         utils.update_user_dynamic_fields(username, {'qs_count': total_qs_accumulated})
-        st.success(f"📈 레벨 평가 진행 중: {total_qs_accumulated} / 50 문제")
+        st.success(f"📈 레벨 평가 진행 중: {total_qs_accumulated} / 20 문제")
+
+    # [NEW] 데이터 자동 백업 (비동기 처리처럼 보이게 맨 마지막에)
+    if drive_sync.upload_db_to_drive():
+        st.toast("☁️ 학습 기록이 안전하게 저장되었습니다.")
 
     # 세트 완료 화면
     batch_size = st.session_state.batch_size
@@ -553,7 +628,8 @@ def show_login_page():
                     # 비밀번호 검증
                     if utils.check_hashes(password, user_info['password']):
                         st.session_state.logged_in = True
-                        st.session_state.username = username
+                        # [FIX] (A) 아이디 대소문자 문제 해결: 세션 저장 시 소문자로 통일
+                        st.session_state.username = username.strip().lower()
                         st.session_state.page = 'dashboard'
                         st.success(f"환영합니다!")
                         st.rerun()
@@ -583,31 +659,28 @@ def show_login_page():
                     # 구글 시트에 가입 요청
                     result = utils.register_user(new_user, new_password, new_realname)
                     if result == "SUCCESS":
+                        # [NEW] 가입 정보 즉시 백업
+                        drive_sync.upload_db_to_drive()
+                        
                         st.session_state.signup_success_popup = True
                         st.rerun()
                     elif result == "EXIST":
                         st.warning("이미 존재하는 아이디입니다.")
                     else:
                         st.error("가입 중 오류가 발생했습니다.")
-
-    with st.sidebar:
-        st.divider()
-        if st.button("👨‍🏫 선생님 전용"):
-            st.session_state.show_admin_login = True
-            
-    if st.session_state.get('show_admin_login', False):
-        with st.sidebar:
-            with st.container(border=True):
-                st.subheader("관리자 로그인")
-                admin_pw = st.text_input("비밀번호", type="password", key="side_admin_pw")
-                if st.button("접속", key="btn_side_admin"):
-                    config = utils.get_system_config()
-                    if admin_pw == config.get('admin_pw', ''):
-                        st.session_state.page = 'admin'
-                        st.session_state.show_admin_login = False
-                        st.rerun()
-                    else:
-                        st.error("비밀번호 오류")
+                        
+    # [CHANGE] 관리자 로그인 버튼을 메인 화면 하단으로 이동 (사이드바 숨김 대응)
+    st.write("")
+    st.write("")
+    with st.expander("👨‍🏫 선생님 전용 (관리자 로그인)"):
+        admin_pw = st.text_input("관리자 비밀번호", type="password", key="side_admin_pw")
+        if st.button("접속", key="btn_side_admin", use_container_width=True):
+            config = utils.get_system_config()
+            if admin_pw == config.get('admin_pw', ''):
+                st.session_state.page = 'admin'
+                st.rerun()
+            else:
+                st.error("비밀번호 오류")
 
     # [MOBILE KEYBOARD FIX] 하단 여백 추가 (키보드가 올라왔을 때 스크롤 가능하도록)
     st.markdown("<div style='height: 40vh;'></div>", unsafe_allow_html=True)
@@ -621,19 +694,20 @@ def show_admin_page():
         
     st.divider()
     
-    tab1, tab2, tab3, tab4 = st.tabs(["👥 학생 관리", "🏆 학습 랭킹", "⚖️ 단어 DB 관리", "⚙️ 시스템 설정"])
+    # [CHANGE] 탭 구조 변경 (단어 DB 관리 추가)
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["👥 학생 관리", "🏆 학습 랭킹", "📚 단어 DB 관리", "⚖️ 레벨 자동 조정", "⚙️ 시스템 설정"])
     
     with tab1:
-        st.subheader("학생 명단 및 비밀번호 초기화")
+        st.subheader("학생 명단 및 관리")
         users = utils.get_all_users()
         if not users.empty:
             st.dataframe(users[['username', 'name', 'level']], use_container_width=True)
             
             st.write("---")
-            st.subheader("🛠 학생 정보 수정")
+            st.subheader("🛠 학생 정보 수정 및 삭제")
             
             # 학생 선택
-            selected_user_id = st.selectbox("수정할 학생 선택", users['username'].tolist())
+            selected_user_id = st.selectbox("관리할 학생 선택", users['username'].tolist())
             
             if selected_user_id:
                 # 선택된 학생의 현재 정보 가져오기
@@ -648,7 +722,11 @@ def show_admin_page():
                     with c3:
                         new_level = st.number_input("레벨", min_value=1, max_value=30, value=int(current_info['level']) if pd.notna(current_info['level']) and str(current_info['level']).isdigit() else 1)
                         
-                    submit_edit = st.form_submit_button("💾 정보 수정 저장")
+                    c_edit, c_del = st.columns([1, 1])
+                    with c_edit:
+                        submit_edit = st.form_submit_button("💾 정보 수정 저장", type="primary", use_container_width=True)
+                    with c_del:
+                        submit_del = st.form_submit_button("🗑️ 학생 삭제 (복구 불가)", type="secondary", use_container_width=True)
                     
                     if submit_edit:
                         if not new_id or not new_name:
@@ -656,6 +734,7 @@ def show_admin_page():
                         else:
                             res = utils.update_student_info(selected_user_id, new_id, new_name, new_level)
                             if res == "SUCCESS":
+                                drive_sync.upload_db_to_drive() # [NEW] 백업
                                 st.success("✅ 학생 정보가 수정되었습니다.")
                                 time.sleep(1)
                                 st.rerun()
@@ -663,6 +742,15 @@ def show_admin_page():
                                 st.error("❌ 이미 존재하는 아이디입니다.")
                             else:
                                 st.error(f"❌ 수정 실패: {res}")
+                                
+                    if submit_del:
+                        if utils.delete_student(selected_user_id):
+                            drive_sync.upload_db_to_drive() # 백업
+                            st.success(f"✅ {selected_user_id} 학생 및 관련 기록이 삭제되었습니다.")
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error("삭제 실패")
 
             st.write("---")
             st.subheader("🔐 비밀번호 초기화")
@@ -672,9 +760,10 @@ def show_admin_page():
                 reset_target = st.text_input("초기화 대상 (자동 입력)", value=selected_user_id, disabled=True)
             with col_btn:
                 st.write("")
-                if st.button("비밀번호 '1234'로 초기화", type="primary"):
+                if st.button("비밀번호 '1234'로 초기화", type="primary", use_container_width=True):
                     success = utils.reset_user_password(selected_user_id, '1234')
                     if success:
+                        drive_sync.upload_db_to_drive() # [NEW] 백업
                         st.success(f"✅ {selected_user_id} 학생 비밀번호 초기화 완료!")
                     else:
                         st.error("초기화 실패")
@@ -712,13 +801,99 @@ def show_admin_page():
             st.info("아직 학습 기록이 없습니다.")
 
     with tab3:
+        st.subheader("📚 단어 데이터베이스 관리")
+        
+        # 1. 검색 및 목록
+        search_query = st.text_input("단어 검색 (영어 또는 한글 뜻)", placeholder="검색어 입력...")
+        df_voca = utils.load_data()
+        
+        if df_voca is not None and not df_voca.empty:
+            if search_query:
+                mask = df_voca['target_word'].str.contains(search_query, case=False, na=False) | \
+                       df_voca['meaning'].str.contains(search_query, case=False, na=False)
+                filtered_df = df_voca[mask]
+            else:
+                filtered_df = df_voca
+                
+            st.caption(f"총 {len(filtered_df)}개의 단어가 표시됩니다.")
+            st.dataframe(filtered_df[['id', 'target_word', 'meaning', 'level']], use_container_width=True, height=200)
+            
+            # 2. 단어 수정/삭제
+            st.write("---")
+            c_left, c_right = st.columns(2)
+            
+            with c_left:
+                st.markdown("#### ✏️ 단어 수정/삭제")
+                target_id = st.number_input("수정할 단어 ID 입력", min_value=0, step=1, help="위 표에서 ID를 확인하세요.")
+                
+                if target_id > 0:
+                    word_row = df_voca[df_voca['id'] == target_id]
+                    if not word_row.empty:
+                        word_data = word_row.iloc[0]
+                        with st.form("edit_word_form"):
+                            e_word = st.text_input("영어 단어", value=word_data['target_word'])
+                            e_mean = st.text_input("뜻", value=word_data['meaning'])
+                            e_lv = st.number_input("레벨", min_value=1, max_value=30, value=int(word_data['level']))
+                            e_sen_en = st.text_area("예문 (En)", value=word_data['sentence_en'])
+                            e_sen_ko = st.text_input("예문 해석 (Ko)", value=word_data['sentence_ko'])
+                            e_root = st.text_input("원형 (Root)", value=word_data.get('root_word', ''))
+                            
+                            c_edit_btn, c_del_btn = st.columns(2)
+                            with c_edit_btn:
+                                if st.form_submit_button("💾 수정 저장", type="primary", use_container_width=True):
+                                    if utils.update_word(target_id, e_word, e_mean, e_lv, e_sen_en, e_sen_ko, e_root):
+                                        drive_sync.upload_db_to_drive()
+                                        st.success("수정 완료!")
+                                        time.sleep(1)
+                                        st.rerun()
+                                    else:
+                                        st.error("수정 실패")
+                            with c_del_btn:
+                                if st.form_submit_button("🗑️ 삭제", type="secondary", use_container_width=True):
+                                    if utils.delete_word(target_id):
+                                        drive_sync.upload_db_to_drive()
+                                        st.success("삭제 완료!")
+                                        time.sleep(1)
+                                        st.rerun()
+                                    else:
+                                        st.error("삭제 실패")
+                    else:
+                        st.warning("해당 ID의 단어를 찾을 수 없습니다.")
+
+            # 3. 단어 추가
+            with c_right:
+                st.markdown("#### ➕ 새 단어 추가")
+                with st.form("add_word_form"):
+                    n_word = st.text_input("영어 단어")
+                    n_mean = st.text_input("뜻")
+                    n_lv = st.number_input("레벨", min_value=1, max_value=30, value=1)
+                    n_sen_en = st.text_area("예문 (En)")
+                    n_sen_ko = st.text_input("예문 해석 (Ko)")
+                    n_root = st.text_input("원형 (Root, 선택)", placeholder="동사 원형 등")
+                    
+                    if st.form_submit_button("추가하기", type="primary", use_container_width=True):
+                        if not n_word or not n_mean:
+                            st.warning("단어와 뜻은 필수입니다.")
+                        else:
+                            if utils.add_word(n_word, n_mean, n_lv, n_sen_en, n_sen_ko, n_root):
+                                drive_sync.upload_db_to_drive()
+                                st.success(f"'{n_word}' 추가 완료!")
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("추가 실패")
+        else:
+            st.error("DB 로드 실패")
+
+    with tab4:
         st.subheader("단어 난이도 자동 조정")
         st.info("학생들의 오답 데이터를 분석하여 단어 레벨(1~30)을 자동 조정합니다.")
         if st.button("🚀 레벨 조정 실행", type="primary"):
             count, msg = utils.adjust_level_based_on_stats()
+            if count > 0: drive_sync.upload_db_to_drive() # [NEW] 백업
             st.info(f"결과: {msg}")
 
-    with tab4:
+    with tab5:
         st.subheader("⚙️ 시스템 보안 설정")
         
         # 설정 로드
@@ -740,6 +915,7 @@ def show_admin_page():
                         s2 = utils.update_system_config('admin_pw', new_admin_pw)
                         
                         if s1 and s2:
+                            drive_sync.upload_db_to_drive() # [NEW] 백업
                             st.success("✅ 설정이 안전하게 저장되었습니다.")
                             time.sleep(1)
                             st.rerun()
