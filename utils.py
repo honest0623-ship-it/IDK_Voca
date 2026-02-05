@@ -304,7 +304,8 @@ def evaluate_level_update(current_level, correct_count, total_questions, fail_st
 
 def register_user(username, password, name):
     """사용자 등록 (SQLite)"""
-    return db.register_user(username, password, name)
+    hashed_pw = make_hashes(password)
+    return db.register_user(username, hashed_pw, name)
 
 def update_user_level(username, new_level):
     """사용자 레벨 업데이트 (SQLite)"""

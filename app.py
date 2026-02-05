@@ -19,14 +19,19 @@ def main():
     )
 
     # [NEW] 앱 시작 시 DB 복구 (클라우드 배포 대응)
-    # voca.db가 없으면 구글 드라이브에서 가져옴
-    if not os.path.exists("voca.db"):
-        with st.spinner("☁️ 서버 데이터를 동기화 중입니다..."):
+    # voca.db가 없으면 구글 드라이브에서 가져옴 -> [FIX] 항상 최신 상태 유지를 위해 세션 시작 시 1회 동기화 시도
+    if 'db_synced' not in st.session_state:
+        with st.spinner("☁️ 서버 데이터(Google Drive)와 동기화 중..."):
             if drive_sync.download_db_from_drive():
-                st.toast("✅ 데이터 복구 완료!")
+                st.toast("✅ 최신 데이터 로드 완료")
             else:
-                # 드라이브에도 없으면(최초 실행) 그냥 넘어감 (database.py가 생성함)
-                pass
+                # 드라이브에 파일이 없거나(최초) 실패 시
+                # 로컬에 파일이 있으면 그거라도 씀
+                if not os.path.exists("voca.db"):
+                    st.toast("⚠️ 서버 데이터 없음 (새 DB 생성 예정)")
+                else:
+                    st.toast("⚠️ 동기화 실패 (로컬 데이터 사용)")
+        st.session_state.db_synced = True
 
     st.markdown("""
         <style>
@@ -619,7 +624,7 @@ def show_login_page():
         
         if choice == "로그인":
             if 'signup_success' in st.session_state: del st.session_state['signup_success']
-            username = st.text_input("아이디")
+            username = st.text_input("아이디 (대소문자 구분 주의)")
             password = st.text_input("비밀번호", type='password')
             
             if st.button("로그인", use_container_width=True):
@@ -673,45 +678,56 @@ def show_login_page():
     st.write("")
     st.write("")
     
-    with st.expander("🔄 데이터 동기화 및 관리자"):
-        st.caption("웹에서 데이터가 보이지 않거나 로그인이 안 될 때 사용하세요.")
+    with st.expander("👨‍🏫 관리자 메뉴 (데이터 복구 & 접속)"):
+        st.caption("DB 동기화나 관리자 페이지 접속은 인증이 필요합니다.")
         
-        # DB 상태 표시
-        if os.path.exists("voca.db"):
-            size_kb = os.path.getsize("voca.db") / 1024
-            mtime = datetime.fromtimestamp(os.path.getmtime("voca.db")).strftime('%Y-%m-%d %H:%M:%S')
-            st.text(f"현재 DB: {size_kb:.1f} KB ({mtime})")
+        # 관리자 인증 전
+        if not st.session_state.get('temp_admin_verified', False):
+            admin_pw_input = st.text_input("관리자 비밀번호", type="password", key="login_admin_pw")
+            if st.button("확인", key="btn_verify_admin"):
+                config = utils.get_system_config()
+                if admin_pw_input == config.get('admin_pw', ''):
+                    st.session_state.temp_admin_verified = True
+                    st.rerun()
+                else:
+                    st.error("❌ 비밀번호가 틀렸습니다.")
+        
+        # 관리자 인증 후
         else:
-            st.warning("DB 파일이 없습니다 (초기화 상태)")
-
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("☁️ 데이터 가져오기 (복구)", use_container_width=True):
-                with st.spinner("구글 드라이브에서 다운로드 중..."):
-                    if drive_sync.download_db_from_drive():
-                        st.success("다운로드 완료! 새로고침 하세요.")
-                        time.sleep(1)
-                        st.rerun()
-                    else:
-                        st.error("다운로드 실패 (설정 확인 필요)")
-        with c2:
-            if st.button("📤 데이터 올리기 (백업)", use_container_width=True):
-                with st.spinner("구글 드라이브로 업로드 중..."):
-                    if drive_sync.upload_db_to_drive():
-                        st.success("업로드 완료!")
-                    else:
-                        st.error("업로드 실패 (설정 확인 필요)")
-        
-        st.divider()
-        st.subheader("👨‍🏫 관리자 로그인")
-        admin_pw = st.text_input("관리자 비밀번호", type="password", key="side_admin_pw")
-        if st.button("접속", key="btn_side_admin", use_container_width=True):
-            config = utils.get_system_config()
-            if admin_pw == config.get('admin_pw', ''):
+            st.success("✅ 관리자 인증 완료")
+            
+            # DB 상태 표시
+            if os.path.exists("voca.db"):
+                size_kb = os.path.getsize("voca.db") / 1024
+                mtime = datetime.fromtimestamp(os.path.getmtime("voca.db")).strftime('%Y-%m-%d %H:%M:%S')
+                st.info(f"📁 현재 DB 상태: {size_kb:.1f} KB (수정: {mtime})")
+            
+            st.markdown("---")
+            st.markdown("**🔄 데이터 동기화 (구글 드라이브)**")
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("☁️ 데이터 가져오기 (복구)", use_container_width=True):
+                    with st.spinner("구글 드라이브에서 다운로드 중..."):
+                        if drive_sync.download_db_from_drive():
+                            st.success("다운로드 완료! 새로고침 하세요.")
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error("다운로드 실패")
+            with c2:
+                if st.button("📤 데이터 올리기 (백업)", use_container_width=True):
+                    with st.spinner("구글 드라이브로 업로드 중..."):
+                        if drive_sync.upload_db_to_drive():
+                            st.success("업로드 완료!")
+                        else:
+                            st.error("업로드 실패")
+            
+            st.markdown("---")
+            if st.button("🚀 관리자 대시보드 입장", type="primary", use_container_width=True):
                 st.session_state.page = 'admin'
+                st.session_state.temp_admin_verified = False # 입장 후 인증 해제 (보안)
                 st.rerun()
-            else:
-                st.error("비밀번호 오류")
 
     # [MOBILE KEYBOARD FIX] 하단 여백 추가 (키보드가 올라왔을 때 스크롤 가능하도록)
     st.markdown("<div style='height: 40vh;'></div>", unsafe_allow_html=True)
