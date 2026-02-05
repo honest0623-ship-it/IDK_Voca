@@ -1178,7 +1178,12 @@ def show_dashboard_page():
         if 'batch_size' not in st.session_state: st.session_state.batch_size = 5
         
         with st.form("goal_setting_form"):
-            batch_option = st.slider("한 번에 학습할 문제 수", 1, 30, st.session_state.batch_size, 1)
+            # [CHANGE] 5문제 단위, 최소 5 ~ 최대 30
+            default_val = st.session_state.batch_size
+            if default_val < 5 or default_val % 5 != 0:
+                default_val = 5
+            
+            batch_option = st.slider("한 번에 학습할 문제 수", 5, 30, default_val, 5)
             st.write("")
             start_btn = st.form_submit_button("🚀 학습 시작하기", type="primary", use_container_width=True)
         
@@ -1617,7 +1622,7 @@ def show_quiz_page():
                 <div class="progress-track">
                 <div class="progress-fill" style="width: {progress_pct}%;"></div>
                 </div>
-                <div class="sentence-card">
+                <div class="sentence-card" style="border: 2px solid #339af0; background-color: #f1f9ff;">
                 <div class="meaning-text">{curr_q['meaning']}</div>
                 <div class="english-text">{masked_sentence}</div>
                 <div class="korean-sub" style="display: block;">{curr_q['sentence_ko']}</div>
