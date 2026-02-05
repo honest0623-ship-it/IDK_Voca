@@ -1077,10 +1077,10 @@ def show_dashboard_page():
     real_today = utils.get_korea_today()
 
     # [NEW] 상단 로그아웃 버튼 (우측 상단 작게 배치)
-    _, col_logout = st.columns([10, 1.5]) 
+    # [FIX] 모바일/PC 모두 적절한 크기를 위해 컬럼 비율 조정 및 use_container_width=False 설정
+    _, col_logout = st.columns([8, 1]) 
     with col_logout:
-        # 텍스트 크기를 작게 조정한 커스텀 버튼 스타일 적용 가능성 고려, 여기서는 컬럼 비율로 크기 조절
-        if st.button("🚪 로그아웃", type="secondary", key="top_logout", use_container_width=True):
+        if st.button("🚪 로그아웃", type="secondary", key="top_logout", use_container_width=False):
             st.session_state.logged_in = False
             st.session_state.page = 'login'
             if 'signup_success' in st.session_state: del st.session_state['signup_success']
