@@ -1188,13 +1188,121 @@ def show_quiz_page():
         curr_q = st.session_state.quiz_list[idx]
         target = curr_q['target_word']
         
-        # TTS 오디오 가져오기 (파일이 없으면 생성)
+    # TTS 오디오 가져오기 (파일이 없으면 생성)
         audio_data = utils.text_to_speech(curr_q['id'], curr_q['sentence_en'])
         
-        st.write(f"**Question {idx + 1} / {len(st.session_state.quiz_list)}**")
-        st.progress((idx) / len(st.session_state.quiz_list))
+        # [MOBILE OPTIMIZATION] CSS & Layout
+        st.markdown("""
+        <style>
+            /* 기본적으로 숨김 (데스크탑에선 영향 없게) */
+            .fixed-question-box { display: none; }
+            
+            @media screen and (max-width: 768px) {
+                /* 1. 상단 헤더 및 여백 제거 */
+                header { display: none !important; }
+                .block-container {
+                    padding-top: 0 !important;
+                    padding-bottom: 0 !important;
+                }
+                
+                /* 2. 문제 영역 고정 (Top 0 ~ 50%) */
+                .fixed-question-box {
+                    display: block;
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 50vh; 
+                    background-color: #ffffff;
+                    z-index: 1000;
+                    padding: 15px;
+                    border-bottom: 2px solid #f0f2f6;
+                    overflow-y: auto; /* 내용 많으면 스크롤 */
+                    box-sizing: border-box;
+                }
+                
+                /* 3. 입력창 고정 (Top 50%) */
+                div[data-testid="stTextInput"] {
+                    position: fixed;
+                    top: 50vh; 
+                    left: 0;
+                    width: 100% !important;
+                    background-color: #ffffff;
+                    z-index: 1001;
+                    padding: 10px 15px;
+                    box-sizing: border-box;
+                    box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+                }
+                
+                /* 입력창 폰트 키우기 */
+                div[data-testid="stTextInput"] input {
+                    font-size: 1.2rem !important;
+                    padding: 12px !important;
+                }
+
+                /* 4. 데스크탑용 요소 숨기기 (모바일 전용 박스를 사용하므로) */
+                .desktop-only { display: none !important; }
+                
+                /* 5. 버튼 위치 조정 (키보드 위 또는 아래) */
+                /* 입력창(Top 50% + Height 약 8~10%) 아래에 위치 */
+                .stButton {
+                    margin-top: 65vh !important; 
+                    padding: 0 15px;
+                }
+            }
+        </style>
+        """, unsafe_allow_html=True)
+
+        # 진행률 계산
+        progress_pct = (idx / len(st.session_state.quiz_list)) * 100
 
         if st.session_state.quiz_state == "answering":
+            # [MOBILE VIEW] 고정된 HTML 렌더링
+            # 포기 모드일 때 정답 공개
+            hint_html = ""
+            if st.session_state.get('gave_up_mode', False):
+                 hint_html = f"<div style='color: #d9534f; font-weight: bold; margin: 10px 0;'>❌ 정답: {target}<br><span style='font-size:0.8em; color:gray;'>(위 정답을 똑같이 입력하세요)</span></div>"
+                 masked_sentence = utils.get_masked_sentence(curr_q['sentence_en'], target, curr_q.get('root_word')) 
+            else:
+                 masked_sentence = utils.get_masked_sentence(curr_q['sentence_en'], target, curr_q.get('root_word'))
+
+            error_html = ""
+            if st.session_state.retry_mode and not st.session_state.get('gave_up_mode', False):
+                error_html = f"<div style='background: #f8d7da; color: #721c24; padding: 8px; border-radius: 5px; margin-top: 10px; font-weight: bold;'>❌ 틀렸습니다. 다시 시도!</div>"
+
+            # Progress Bar HTML
+            progress_html = f"""
+            <div style="margin-bottom: 10px;">
+                <div style="font-size: 0.85em; color: #666; display: flex; justify-content: space-between;">
+                    <span>Question {idx + 1}</span>
+                    <span>{len(st.session_state.quiz_list)}</span>
+                </div>
+                <div style="width: 100%; background-color: #e9ecef; height: 8px; border-radius: 4px; margin-top: 4px;">
+                    <div style="width: {progress_pct}%; background-color: #ff4b4b; height: 8px; border-radius: 4px; transition: width 0.3s;"></div>
+                </div>
+            </div>
+            """
+
+            mobile_html = f"""
+            <div class="fixed-question-box">
+                {progress_html}
+                <div style="margin-top: 15px;">
+                    <div style="font-size: 1.3em; font-weight: bold; color: #333;">💡 {curr_q['meaning']}</div>
+                    <div style="font-size: 1em; color: #555; margin-top: 5px;">📖 {curr_q['sentence_ko']}</div>
+                    <div style="background: #e8f0fe; color: #1a73e8; padding: 12px; border-radius: 8px; margin-top: 15px; font-weight: 500; font-size: 1.1em; line-height: 1.5;">
+                        {masked_sentence}
+                    </div>
+                    {hint_html}
+                    {error_html}
+                </div>
+            </div>
+            """
+            st.markdown(mobile_html, unsafe_allow_html=True)
+            
+            # [DESKTOP VIEW] 기존 방식 유지 (class="desktop-only" 추가)
+            st.markdown('<div class="desktop-only">', unsafe_allow_html=True)
+            st.write(f"**Question {idx + 1} / {len(st.session_state.quiz_list)}**")
+            st.progress((idx) / len(st.session_state.quiz_list))
             with st.container(border=True):
                 st.subheader(f"💡 뜻: {curr_q['meaning']}")
                 st.write(f"📖 해석: {curr_q['sentence_ko']}")
@@ -1202,14 +1310,12 @@ def show_quiz_page():
                 # [CHANGE] 포기 모드일 때 정답 공개
                 if st.session_state.get('gave_up_mode', False):
                      st.error(f"❌ 정답은 **{target}** 입니다. 아래에 똑같이 입력하세요.")
-                     masked_sentence = utils.get_masked_sentence(curr_q['sentence_en'], target, curr_q.get('root_word')) # 문장은 그대로 가림 (입력 유도)
-                else:
-                     masked_sentence = utils.get_masked_sentence(curr_q['sentence_en'], target, curr_q.get('root_word'))
-                
                 st.info(f"### {masked_sentence}")
 
             if st.session_state.retry_mode and not st.session_state.get('gave_up_mode', False):
                 st.warning(f"❌ 틀렸습니다. 다시 시도해보세요!")
+            st.markdown('</div>', unsafe_allow_html=True)
+            # --- End Desktop View ---
 
             input_key = f"quiz_in_{idx}_{st.session_state.retry_mode}_{st.session_state.get('gave_up_mode', False)}"
             
@@ -1225,7 +1331,7 @@ def show_quiz_page():
             
             # [NEW] 포기(Pass) 버튼 추가 (포기 모드가 아닐 때만 표시)
             if not st.session_state.get('gave_up_mode', False):
-                st.write("")
+                st.write("") # 모바일 Spacer 역할 (CSS margin-top이 처리하지만 안전장치)
                 if st.button("🤷‍♂️ 정답을 모르겠어요 (Pass)", type="secondary", use_container_width=True, 
                              on_click=give_up_callback, args=(username, curr_q, today)):
                     pass
@@ -1233,6 +1339,13 @@ def show_quiz_page():
             utils.focus_element("input")
 
         elif st.session_state.quiz_state == "success":
+            # Success 화면은 기존 유지 (모바일에서도 스크롤되면 됨)
+            # 단, 상단 헤더가 숨겨질 수 있으므로 약간의 여백 필요할 수도 있음
+            # 일단 기존 로직 사용
+            
+            st.write(f"**Question {idx + 1} / {len(st.session_state.quiz_list)}**")
+            st.progress((idx) / len(st.session_state.quiz_list))
+            
             with st.container(border=True):
                 # 결과에 따른 메시지 분기
                 if st.session_state.get("last_result") == "gave_up":
