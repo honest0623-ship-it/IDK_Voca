@@ -672,7 +672,38 @@ def show_login_page():
     # [CHANGE] 관리자 로그인 버튼을 메인 화면 하단으로 이동 (사이드바 숨김 대응)
     st.write("")
     st.write("")
-    with st.expander("👨‍🏫 선생님 전용 (관리자 로그인)"):
+    
+    with st.expander("🔄 데이터 동기화 및 관리자"):
+        st.caption("웹에서 데이터가 보이지 않거나 로그인이 안 될 때 사용하세요.")
+        
+        # DB 상태 표시
+        if os.path.exists("voca.db"):
+            size_kb = os.path.getsize("voca.db") / 1024
+            mtime = datetime.fromtimestamp(os.path.getmtime("voca.db")).strftime('%Y-%m-%d %H:%M:%S')
+            st.text(f"현재 DB: {size_kb:.1f} KB ({mtime})")
+        else:
+            st.warning("DB 파일이 없습니다 (초기화 상태)")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("☁️ 데이터 가져오기 (복구)", use_container_width=True):
+                with st.spinner("구글 드라이브에서 다운로드 중..."):
+                    if drive_sync.download_db_from_drive():
+                        st.success("다운로드 완료! 새로고침 하세요.")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("다운로드 실패 (설정 확인 필요)")
+        with c2:
+            if st.button("📤 데이터 올리기 (백업)", use_container_width=True):
+                with st.spinner("구글 드라이브로 업로드 중..."):
+                    if drive_sync.upload_db_to_drive():
+                        st.success("업로드 완료!")
+                    else:
+                        st.error("업로드 실패 (설정 확인 필요)")
+        
+        st.divider()
+        st.subheader("👨‍🏫 관리자 로그인")
         admin_pw = st.text_input("관리자 비밀번호", type="password", key="side_admin_pw")
         if st.button("접속", key="btn_side_admin", use_container_width=True):
             config = utils.get_system_config()
