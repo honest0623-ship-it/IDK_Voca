@@ -908,9 +908,14 @@ def show_dashboard_page():
 
     total_learned = len(progress_df)
     long_term_count = len(progress_df[progress_df['interval'] > 14])
-    # 오늘 날짜보다 '작거나 같은'(<=) 리뷰 대상 단어
+    # 오늘 날짜보다 '작거나 같은'(<=) 리뷰 대상 단어 (오늘 이미 한 것은 제외)
     if 'next_review' in progress_df.columns:
-        review_count = len(progress_df[progress_df['next_review'] <= real_today])
+        target_mask = progress_df['next_review'] <= real_today
+        if 'last_reviewed' in progress_df.columns:
+            not_reviewed_today = progress_df['last_reviewed'] != real_today
+            review_count = len(progress_df[target_mask & not_reviewed_today])
+        else:
+            review_count = len(progress_df[target_mask])
     else:
         review_count = 0
 
