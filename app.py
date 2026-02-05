@@ -1234,20 +1234,20 @@ def show_quiz_page():
             # Construct HTML (Left-aligned to prevent code block rendering)
             sticky_content = f"""
 <div class="sticky-header">
-    <div style="font-size: 0.85em; color: #666; display: flex; justify-content: space-between; margin-bottom: 5px;">
-        <span>Question {idx + 1}</span>
-        <span>{len(st.session_state.quiz_list)}</span>
-    </div>
-    <div style="width: 100%; background-color: #e9ecef; height: 6px; border-radius: 3px; margin-bottom: 15px;">
-        <div style="width: {progress_pct}%; background-color: #ff4b4b; height: 6px; border-radius: 3px;"></div>
-    </div>
-    <div style="font-size: 1.2em; font-weight: bold; color: #333; margin-bottom: 5px;">💡 {curr_q['meaning']}</div>
-    <div style="font-size: 1em; color: #555;">📖 {curr_q['sentence_ko']}</div>
-    <div style="background: #e8f0fe; color: #1a73e8; padding: 12px; border-radius: 8px; margin-top: 12px; font-weight: 500; font-size: 1.1em; line-height: 1.4;">
-        {masked_sentence}
-    </div>
-    {hint_html}
-    {error_html}
+<div style="font-size: 0.85em; color: #666; display: flex; justify-content: space-between; margin-bottom: 5px;">
+<span>Question {idx + 1}</span>
+<span>{len(st.session_state.quiz_list)}</span>
+</div>
+<div style="width: 100%; background-color: #e9ecef; height: 6px; border-radius: 3px; margin-bottom: 15px;">
+<div style="width: {progress_pct}%; background-color: #ff4b4b; height: 6px; border-radius: 3px;"></div>
+</div>
+<div style="font-size: 1.2em; font-weight: bold; color: #333; margin-bottom: 5px;">💡 {curr_q['meaning']}</div>
+<div style="font-size: 1em; color: #555;">📖 {curr_q['sentence_ko']}</div>
+<div style="background: #e8f0fe; color: #1a73e8; padding: 12px; border-radius: 8px; margin-top: 12px; font-weight: 500; font-size: 1.1em; line-height: 1.4;">
+{masked_sentence}
+</div>
+{hint_html}
+{error_html}
 </div>
 """
             st.markdown(sticky_content, unsafe_allow_html=True)
@@ -1273,102 +1273,6 @@ def show_quiz_page():
             st.write(f"**Question {idx + 1} / {len(st.session_state.quiz_list)}**")
             st.progress(progress_pct / 100)
             with st.container(border=True):
-
-
-        # 진행률 계산
-        progress_pct = (idx / len(st.session_state.quiz_list)) * 100
-
-        if st.session_state.quiz_state == "answering":
-            # [MOBILE VIEW] 고정된 HTML 렌더링
-            # 포기 모드일 때 정답 공개
-            hint_html = ""
-            if st.session_state.get('gave_up_mode', False):
-                 hint_html = f"<div style='color: #d9534f; font-weight: bold; margin: 10px 0;'>❌ 정답: {target}<br><span style='font-size:0.8em; color:gray;'>(위 정답을 똑같이 입력하세요)</span></div>"
-                 masked_sentence = utils.get_masked_sentence(curr_q['sentence_en'], target, curr_q.get('root_word')) 
-            else:
-                 masked_sentence = utils.get_masked_sentence(curr_q['sentence_en'], target, curr_q.get('root_word'))
-
-            error_html = ""
-            if st.session_state.retry_mode and not st.session_state.get('gave_up_mode', False):
-                error_html = f"<div style='background: #f8d7da; color: #721c24; padding: 8px; border-radius: 5px; margin-top: 10px; font-weight: bold;'>❌ 틀렸습니다. 다시 시도!</div>"
-
-            # Progress Bar HTML
-            progress_html = f"""
-            <div style="margin-bottom: 10px;">
-                <div style="font-size: 0.85em; color: #666; display: flex; justify-content: space-between;">
-                    <span>Question {idx + 1}</span>
-                    <span>{len(st.session_state.quiz_list)}</span>
-                </div>
-                <div style="width: 100%; background-color: #e9ecef; height: 8px; border-radius: 4px; margin-top: 4px;">
-                    <div style="width: {progress_pct}%; background-color: #ff4b4b; height: 8px; border-radius: 4px; transition: width 0.3s;"></div>
-                </div>
-            </div>
-            """
-
-            mobile_html = f"""
-            <div class="fixed-question-box">
-                {progress_html}
-                <div style="margin-top: 15px;">
-                    <div style="font-size: 1.3em; font-weight: bold; color: #333;">💡 {curr_q['meaning']}</div>
-                    <div style="font-size: 1em; color: #555; margin-top: 5px;">📖 {curr_q['sentence_ko']}</div>
-                    <div style="background: #e8f0fe; color: #1a73e8; padding: 12px; border-radius: 8px; margin-top: 15px; font-weight: 500; font-size: 1.1em; line-height: 1.5;">
-                        {masked_sentence}
-                    </div>
-                    {hint_html}
-                    {error_html}
-                </div>
-            </div>
-            """
-            st.markdown(mobile_html, unsafe_allow_html=True)
-            
-            # [DESKTOP VIEW] 기존 방식 유지 (class="desktop-only" 추가)
-            st.markdown('<div class="desktop-only">', unsafe_allow_html=True)
-            st.write(f"**Question {idx + 1} / {len(st.session_state.quiz_list)}**")
-            st.progress((idx) / len(st.session_state.quiz_list))
-            with st.container(border=True):
-                st.subheader(f"💡 뜻: {curr_q['meaning']}")
-                st.write(f"📖 해석: {curr_q['sentence_ko']}")
-                
-                # [CHANGE] 포기 모드일 때 정답 공개
-                if st.session_state.get('gave_up_mode', False):
-                     st.error(f"❌ 정답은 **{target}** 입니다. 아래에 똑같이 입력하세요.")
-                st.info(f"### {masked_sentence}")
-
-            if st.session_state.retry_mode and not st.session_state.get('gave_up_mode', False):
-                st.warning(f"❌ 틀렸습니다. 다시 시도해보세요!")
-            st.markdown('</div>', unsafe_allow_html=True)
-            # --- End Desktop View ---
-
-            input_key = f"quiz_in_{idx}_{st.session_state.retry_mode}_{st.session_state.get('gave_up_mode', False)}"
-            
-            # [NEW] 재시도 시 이전 오답값 불러오기
-            default_val = ""
-            if st.session_state.retry_mode and not st.session_state.get('gave_up_mode', False):
-                default_val = st.session_state.get('last_wrong_input', "")
-            
-            # 입력창 (Enter 시 check_answer_callback 호출)
-            placeholder_text = "정답 입력 후 엔터" if not st.session_state.get('gave_up_mode', False) else "위 정답을 똑같이 입력 후 엔터"
-            st.text_input("정답 입력:", value=default_val, key=input_key, label_visibility="collapsed", placeholder=placeholder_text, 
-                          on_change=check_answer_callback, args=(username, curr_q, target, today))
-            
-            # [NEW] 포기(Pass) 버튼 추가 (포기 모드가 아닐 때만 표시)
-            if not st.session_state.get('gave_up_mode', False):
-                st.write("") # 모바일 Spacer 역할 (CSS margin-top이 처리하지만 안전장치)
-                if st.button("🤷‍♂️ 정답을 모르겠어요 (Pass)", type="secondary", use_container_width=True, 
-                             on_click=give_up_callback, args=(username, curr_q, today)):
-                    pass
-                
-            utils.focus_element("input")
-
-        elif st.session_state.quiz_state == "success":
-            # Success 화면은 기존 유지 (모바일에서도 스크롤되면 됨)
-            # 단, 상단 헤더가 숨겨질 수 있으므로 약간의 여백 필요할 수도 있음
-            # 일단 기존 로직 사용
-            
-            st.write(f"**Question {idx + 1} / {len(st.session_state.quiz_list)}**")
-            st.progress((idx) / len(st.session_state.quiz_list))
-            
-            with st.container(border=True):
                 # 결과에 따른 메시지 분기
                 if st.session_state.get("last_result") == "gave_up":
                     st.error(f"❌ 아쉽네요. 정답은 **{target}** 입니다.")
@@ -1388,6 +1292,7 @@ def show_quiz_page():
             if st.button("다음 문제 ➡ (Enter)", type="primary", key=f"next_btn_{idx}", use_container_width=True, on_click=go_next_question):
                 pass
             utils.focus_element("button")
+
 
     except Exception as e:
         st.error(f"오류가 발생했습니다: {e}")
