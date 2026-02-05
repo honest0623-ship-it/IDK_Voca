@@ -341,6 +341,41 @@ def save_user_progress(username, progress_df):
     finally:
         conn.close()
 
+def update_single_user_progress(username, word_id, last_reviewed, next_review, interval, fail_count):
+    """단일 단어 진행 상황 업데이트 (UPSERT) - 성능 최적화용"""
+    conn = get_db_connection()
+    c = conn.cursor()
+    try:
+        # 날짜 타입 변환 (Safety)
+        if hasattr(last_reviewed, 'strftime'): last_reviewed = str(last_reviewed)
+        if hasattr(next_review, 'strftime'): next_review = str(next_review)
+        
+        # 1. 존재 여부 확인
+        c.execute("SELECT id FROM user_progress WHERE username = ? AND word_id = ?", (username, word_id))
+        row = c.fetchone()
+        
+        if row:
+            # Update
+            c.execute('''
+                UPDATE user_progress 
+                SET last_reviewed = ?, next_review = ?, interval = ?, fail_count = ?
+                WHERE id = ?
+            ''', (last_reviewed, next_review, interval, fail_count, row['id']))
+        else:
+            # Insert
+            c.execute('''
+                INSERT INTO user_progress (username, word_id, last_reviewed, next_review, interval, fail_count)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (username, word_id, last_reviewed, next_review, interval, fail_count))
+            
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error updating single progress: {e}")
+        return False
+    finally:
+        conn.close()
+
 
 def batch_log_study_results(log_buffer):
     """학습 로그 일괄 저장 (기존 batch_log_study_results 대체)"""

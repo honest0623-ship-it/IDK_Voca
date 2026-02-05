@@ -237,8 +237,12 @@ def check_answer_callback(username, curr_q, target, today):
             
             if st.session_state.is_first_attempt and st.session_state.get("quiz_mode") == "normal":
                 st.session_state.user_progress_df = utils.update_schedule(curr_q['id'], True, st.session_state.user_progress_df, today)
-                # [CHANGE] 진도표도 즉시 저장
-                utils.save_progress_fast(username, st.session_state.user_progress_df)
+                # [CHANGE] 진도표 즉시 저장 (단일 행 최적화)
+                try:
+                    target_row = st.session_state.user_progress_df[st.session_state.user_progress_df['word_id'] == curr_q['id']].iloc[0]
+                    utils.save_progress_single(username, curr_q['id'], target_row)
+                except Exception as e:
+                    print(f"Save Error: {e}")
             
             st.session_state.quiz_state = "success"
             st.session_state.last_result = "correct"
@@ -284,8 +288,12 @@ def give_up_callback(username, curr_q, today):
             
         if st.session_state.get("quiz_mode") == "normal":
             st.session_state.user_progress_df = utils.update_schedule(curr_q['id'], False, st.session_state.user_progress_df, today)
-            # [CHANGE] 진도표 즉시 저장
-            utils.save_progress_fast(username, st.session_state.user_progress_df)
+            # [CHANGE] 진도표 즉시 저장 (단일 행 최적화)
+            try:
+                target_row = st.session_state.user_progress_df[st.session_state.user_progress_df['word_id'] == curr_q['id']].iloc[0]
+                utils.save_progress_single(username, curr_q['id'], target_row)
+            except Exception as e:
+                print(f"Save Error: {e}")
         
     # 5. 오답 리스트 추가 (재학습용) - 중복 방지
     if 'wrong_answers' not in st.session_state: st.session_state.wrong_answers = []
@@ -1226,7 +1234,8 @@ def show_quiz_page():
         else:
             today = real_today
 
-        batch_size = st.session_state.batch_size
+        # [FIX] Auto-resume 시 batch_size가 없을 수 있으므로 기본값 처리
+        batch_size = st.session_state.get('batch_size', 5)
 
         with st.sidebar:
             if st.button("🏠 홈으로 (대시보드)"):

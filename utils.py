@@ -160,6 +160,21 @@ def save_progress(username, progress_df):
 def save_progress_fast(username, progress_df):
     """진도 저장 (SQLite - Fast Alias)"""
     return db.save_user_progress(username, progress_df)
+
+def save_progress_single(username, word_id, row_data):
+    """단일 단어 진도 저장 (Optimized)
+       row_data: Series or dict containing 'last_reviewed', 'next_review', 'interval', 'fail_count'
+    """
+    try:
+        lr = row_data.get('last_reviewed')
+        nr = row_data.get('next_review')
+        iv = row_data.get('interval', 0)
+        fc = row_data.get('fail_count', 0)
+        return db.update_single_user_progress(username, word_id, lr, nr, iv, fc)
+    except Exception as e:
+        print(f"Wrapper Error: {e}")
+        return False
+
 def log_study_result(username, word_id, level, is_correct):
     today = get_korea_today()
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
