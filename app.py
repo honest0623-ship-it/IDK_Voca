@@ -7,6 +7,7 @@ import altair as alt
 import utils 
 import streamlit.components.v1 as components
 import time
+import textwrap
 import drive_sync # [NEW] 동기화 모듈
 
 # --- 화면 렌더링 함수 (메인 진입점) ---
@@ -562,10 +563,8 @@ def handle_session_end(username, progress_df, today):
         st.toast("☁️ 학습 기록이 안전하게 저장되었습니다.")
 
     # 세트 완료 화면
-    batch_size = st.session_state.batch_size
+    batch_size = st.session_state.get('batch_size', 5)
 
-    # 세트 완료 화면
-    batch_size = st.session_state.batch_size
     
     if st.session_state.wrong_answers:
         st.session_state.quiz_list = st.session_state.wrong_answers
@@ -607,10 +606,11 @@ def show_login_page():
         
         if choice == "로그인":
             if 'signup_success' in st.session_state: del st.session_state['signup_success']
-            username = st.text_input("아이디 (대소문자 구분 주의)")
-            password = st.text_input("비밀번호", type='password')
             
-            if st.button("로그인", use_container_width=True):
+            def login_callback():
+                username = st.session_state.login_id
+                password = st.session_state.login_pw
+                
                 user_info = utils.get_user_info(username)
                 if user_info:
                     # 비밀번호 검증
@@ -619,12 +619,20 @@ def show_login_page():
                         # [FIX] (A) 아이디 대소문자 문제 해결: 세션 저장 시 소문자로 통일
                         st.session_state.username = username.strip().lower()
                         st.session_state.page = 'dashboard'
-                        st.success(f"환영합니다!")
-                        st.rerun()
+                        st.session_state.login_error = None
                     else:
-                        st.error("비밀번호가 틀렸습니다.")
+                        st.session_state.login_error = "비밀번호가 틀렸습니다."
                 else:
-                    st.error("등록되지 않은 학생입니다.")
+                    st.session_state.login_error = "등록되지 않은 학생입니다."
+
+            st.text_input("아이디 (대소문자 구분 주의)", key="login_id")
+            st.text_input("비밀번호", type='password', key="login_pw", on_change=login_callback)
+            
+            if st.session_state.get("login_error"):
+                st.error(st.session_state.login_error)
+            
+            if st.button("로그인", use_container_width=True, on_click=login_callback):
+                pass
         
         elif choice == "회원가입":
             st.info("📢 학원생만 가입 가능합니다. 선생님께 인증 코드를 문의하세요.")
@@ -1451,27 +1459,130 @@ def show_quiz_page():
     # TTS 오디오 가져오기 (파일이 없으면 생성)
         audio_data = utils.text_to_speech(curr_q['id'], curr_q['sentence_en'])
         
-        # [MOBILE LAYOUT FIX] Sticky Header Approach
+        # [MOBILE LAYOUT FIX] Sticky Header Approach -> [MALHEBOCA STYLE]
         st.markdown("""
         <style>
-            /* Sticky Header Style */
-            .sticky-header {
+            /* Hide Streamlit Header */
+            header { visibility: hidden; }
+            .block-container { padding-top: 1rem; max-width: 700px; margin: 0 auto; }
+            
+            /* Sticky Game Area */
+            .quiz-container {
                 position: -webkit-sticky; /* Safari */
                 position: sticky;
                 top: 0;
                 background-color: white;
-                z-index: 999;
-                padding: 10px 0 15px 0;
-                border-bottom: 2px solid #f0f2f6;
+                z-index: 100;
+                padding: 15px 0 20px 0;
+                border-bottom: 1px solid #f0f0f0;
             }
-            /* Hide Streamlit Header for more space */
-            header { visibility: hidden; }
-            .block-container { padding-top: 1rem; }
             
-            /* Input field styling */
-            div[data-testid="stTextInput"] input {
+            /* Progress Bar */
+            .progress-track {
+                width: 100%;
+                background-color: #f1f3f5;
+                height: 6px;
+                border-radius: 3px;
+                margin-bottom: 20px;
+                overflow: hidden;
+            }
+            .progress-fill {
+                background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);
+                height: 100%;
+                border-radius: 3px;
+                transition: width 0.3s ease;
+            }
+            
+            /* Card Design */
+            .sentence-card {
+                background-color: #f8f9fa;
+                border-radius: 16px;
+                padding: 25px 20px;
+                text-align: center;
+                margin-bottom: 10px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+                border: 1px solid #e9ecef;
+                animation: slideUp 0.4s ease-out;
+            }
+            @keyframes slideUp {
+                from { opacity: 0; transform: translateY(10px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            
+            .meaning-text {
                 font-size: 1.1rem;
+                color: #868e96;
+                font-weight: 600;
+                margin-bottom: 15px;
+            }
+            
+            .english-text {
+                font-size: 1.5rem;
+                font-weight: 700;
+                color: #343a40;
+                line-height: 1.5;
+            }
+            
+            .korean-sub {
+                font-size: 0.95rem;
+                color: #adb5bd;
+                margin-top: 15px;
+                font-weight: 400;
+            }
+            
+            /* Blank Style */
+            .blank-box {
+                display: inline-block;
+                min-width: 60px;
+                border-bottom: 3px solid #339af0;
+                color: transparent;
+                margin: 0 4px;
+            }
+
+            /* Input Styling */
+            div[data-testid="stTextInput"] input {
+                font-size: 1.4rem !important;
+                padding: 12px !important;
+                text-align: center;
+                background-color: #fff;
+                border: 2px solid #dee2e6;
+                border-radius: 12px;
+                color: #333;
+            }
+            div[data-testid="stTextInput"] input:focus {
+                border-color: #339af0;
+                box-shadow: 0 0 0 3px rgba(51, 154, 240, 0.1);
+            }
+            
+            /* Hint & Error */
+            .hint-box {
+                background-color: #fff3cd;
+                color: #856404;
                 padding: 10px;
+                border-radius: 8px;
+                margin-top: 10px;
+                text-align: center;
+                font-weight: bold;
+                animation: fadeIn 0.3s;
+            }
+            .error-box {
+                background-color: #ffe3e3;
+                color: #c92a2a;
+                padding: 10px;
+                border-radius: 8px;
+                margin-top: 10px;
+                text-align: center;
+                font-weight: bold;
+                animation: shake 0.3s;
+            }
+            
+            @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+            @keyframes shake {
+                0% { transform: translateX(0); }
+                25% { transform: translateX(-5px); }
+                50% { transform: translateX(5px); }
+                75% { transform: translateX(-5px); }
+                100% { transform: translateX(0); }
             }
         </style>
         """, unsafe_allow_html=True)
@@ -1481,35 +1592,40 @@ def show_quiz_page():
         if st.session_state.quiz_state == "answering":
             # Hint & Error Logic
             hint_html = ""
+            masked_sentence = utils.get_masked_sentence(curr_q['sentence_en'], target, curr_q.get('root_word'))
+            
+            # [DESIGN] Replace [ ❓ ] with styled blank
+            if "[ ❓ ]" in masked_sentence:
+                # [DESIGN] Dynamic blank length based on target word length
+                blank_str = "_" * max(4, len(target))
+                masked_sentence = masked_sentence.replace("[ ❓ ]", f"<span class='blank-box'>{blank_str}</span>")
+
             if st.session_state.get('gave_up_mode', False):
-                 hint_html = f"<div style='color: #d9534f; font-weight: bold; margin-top: 10px;'>❌ 정답: {target}<br><span style='font-size:0.8em; color:gray;'>(위 정답을 똑같이 입력하세요)</span></div>"
-                 masked_sentence = utils.get_masked_sentence(curr_q['sentence_en'], target, curr_q.get('root_word')) 
-            else:
-                 masked_sentence = utils.get_masked_sentence(curr_q['sentence_en'], target, curr_q.get('root_word'))
+                 hint_html = f"<div class='hint-box'>💡 정답: {target}</div>"
 
             error_html = ""
             if st.session_state.retry_mode and not st.session_state.get('gave_up_mode', False):
-                error_html = f"<div style='background: #f8d7da; color: #721c24; padding: 8px; border-radius: 5px; margin-top: 10px; font-weight: bold;'>❌ 틀렸습니다. 다시 시도!</div>"
+                error_html = f"<div class='error-box'>❌ 다시 시도해보세요!</div>"
 
             # Construct HTML (Left-aligned to prevent code block rendering)
-            sticky_content = f"""
-<div class="sticky-header">
-<div style="font-size: 0.85em; color: #666; display: flex; justify-content: space-between; margin-bottom: 5px;">
-<span>Question {idx + 1}</span>
-<span>{len(st.session_state.quiz_list)}</span>
-</div>
-<div style="width: 100%; background-color: #e9ecef; height: 6px; border-radius: 3px; margin-bottom: 15px;">
-<div style="width: {progress_pct}%; background-color: #ff4b4b; height: 6px; border-radius: 3px;"></div>
-</div>
-<div style="font-size: 1.2em; font-weight: bold; color: #333; margin-bottom: 5px;">💡 {curr_q['meaning']}</div>
-<div style="font-size: 1em; color: #555;">📖 {curr_q['sentence_ko']}</div>
-<div style="background: #e8f0fe; color: #1a73e8; padding: 12px; border-radius: 8px; margin-top: 12px; font-weight: 500; font-size: 1.1em; line-height: 1.4;">
-{masked_sentence}
-</div>
-{hint_html}
-{error_html}
-</div>
-"""
+            sticky_content = textwrap.dedent(f"""
+                <div class="quiz-container">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 8px; color: #868e96; font-size: 0.9rem; font-weight: 500;">
+                <span>Step {idx + 1} <span style="color: #dee2e6;">|</span> Lv.{curr_q['level']}</span>
+                <span>{len(st.session_state.quiz_list)}</span>
+                </div>
+                <div class="progress-track">
+                <div class="progress-fill" style="width: {progress_pct}%;"></div>
+                </div>
+                <div class="sentence-card">
+                <div class="meaning-text">{curr_q['meaning']}</div>
+                <div class="english-text">{masked_sentence}</div>
+                <div class="korean-sub" style="display: block;">{curr_q['sentence_ko']}</div>
+                </div>
+                {hint_html}
+                {error_html}
+                </div>
+            """)
             st.markdown(sticky_content, unsafe_allow_html=True)
 
             # Input Field (Natural Flow)
@@ -1530,21 +1646,32 @@ def show_quiz_page():
             utils.focus_element("input")
 
         elif st.session_state.quiz_state == "success":
-            st.write(f"**Question {idx + 1} / {len(st.session_state.quiz_list)}**")
-            st.progress(progress_pct / 100)
-            with st.container(border=True):
-                # [CHANGE] 포기 후 정답 입력 시에도 '정답!' 메시지 출력으로 통일
-                root = curr_q.get('root_word', '')
-                if root and isinstance(root, str) and root.strip() and root.lower() != target.lower():
-                    st.success(f"✅ 정답! **{target}** (원형: {root})")
-                else:
-                    st.success(f"✅ 정답! **{target}**")
-                
-                highlighted_html = utils.get_highlighted_sentence(curr_q['sentence_en'], target)
-                st.markdown(f"""<div class="success-sentence-box">{highlighted_html}</div>""", unsafe_allow_html=True)
-                
-                if audio_data:
-                    st.audio(audio_data, format='audio/mp3', autoplay=True)
+            # [DESIGN] Success state also uses the card design
+            highlighted_html = utils.get_highlighted_sentence(curr_q['sentence_en'], target)
+            
+            success_content = textwrap.dedent(f"""
+                <div class="quiz-container">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 8px; color: #868e96; font-size: 0.9rem; font-weight: 500;">
+                <span>Step {idx + 1} <span style="color: #dee2e6;">|</span> Lv.{curr_q['level']}</span>
+                <span>{len(st.session_state.quiz_list)}</span>
+                </div>
+                <div class="progress-track">
+                <div class="progress-fill" style="width: {progress_pct}%;"></div>
+                </div>
+                <div class="sentence-card" style="border: 2px solid #339af0; background-color: #f1f9ff;">
+                <div class="meaning-text">{curr_q['meaning']}</div>
+                <div class="english-text">{highlighted_html}</div>
+                <div class="korean-sub" style="color: #495057; display: block;">{curr_q['sentence_ko']}</div>
+                </div>
+                <div class="hint-box" style="background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb;">
+                🎉 정답입니다! {f"(원형: {curr_q['root_word']})" if curr_q.get('root_word') and curr_q['root_word'] != target else ""}
+                </div>
+                </div>
+            """)
+            st.markdown(success_content, unsafe_allow_html=True)
+            
+            if audio_data:
+                st.audio(audio_data, format='audio/mp3', autoplay=True)
 
             if st.button("다음 문제 ➡ (Enter)", type="primary", key=f"next_btn_{idx}", use_container_width=True, on_click=go_next_question):
                 pass
