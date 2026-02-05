@@ -1076,6 +1076,19 @@ def show_dashboard_page():
     progress_df = utils.load_user_progress(username)
     real_today = utils.get_korea_today()
 
+    # [NEW] 상단 로그아웃 버튼 (우측 상단 작게 배치)
+    _, col_logout = st.columns([10, 1.5]) 
+    with col_logout:
+        # 텍스트 크기를 작게 조정한 커스텀 버튼 스타일 적용 가능성 고려, 여기서는 컬럼 비율로 크기 조절
+        if st.button("🚪 로그아웃", type="secondary", key="top_logout", use_container_width=True):
+            st.session_state.logged_in = False
+            st.session_state.page = 'login'
+            if 'signup_success' in st.session_state: del st.session_state['signup_success']
+            # 세션 초기화
+            for k in list(st.session_state.keys()):
+                if k not in ['logged_in', 'page']: del st.session_state[k]
+            st.rerun()
+
     # [MOBILE OPTIMIZED] 메인 컬럼 제거
     st.markdown(f"<h1 style='text-align: center;'>👋 안녕하세요.<br>{realname} 학생!</h1>", unsafe_allow_html=True)
     st.markdown(f"<h4 style='text-align: center; color: #4e8cff;'>현재 레벨: Lv.{user_level}</h4>", unsafe_allow_html=True)
@@ -1095,11 +1108,27 @@ def show_dashboard_page():
         review_count = 0
 
     with st.container(border=True):
-        st.markdown("##### 📊 나의 학습 현황")
+        # [CHANGE] 박스 내 모든 글씨 가운데 정렬 (Metrics 대신 Custom HTML 사용)
+        st.markdown("<h5 style='text-align: center;'>📊 나의 학습 현황</h5>", unsafe_allow_html=True)
+        
         c1, c2, c3 = st.columns(3)
-        with c1: st.metric("총 단어", f"{total_learned}개")
-        with c2: st.metric("마스터", f"{long_term_count}개")
-        with c3: st.metric("오늘 복습", f"{review_count}개", delta_color="inverse")
+        
+        # 공통 스타일
+        metric_style = """
+        <div style='text-align: center;'>
+            <p style='margin: 0; font-size: 0.9em; color: #666;'>{}</p>
+            <p style='margin: 0; font-size: 1.5em; font-weight: bold; color: #333;'>{}</p>
+        </div>
+        """
+        
+        with c1: 
+            st.markdown(metric_style.format("총 단어", f"{total_learned}개"), unsafe_allow_html=True)
+        with c2: 
+            st.markdown(metric_style.format("마스터", f"{long_term_count}개"), unsafe_allow_html=True)
+        with c3: 
+            st.markdown(metric_style.format("오늘 복습", f"{review_count}개"), unsafe_allow_html=True)
+            
+        st.write("") # [CHANGE] 하단 여백 추가 (상단과 균형 맞춤)
 
     st.write("") 
     with st.container(border=True):
@@ -1158,16 +1187,6 @@ def show_dashboard_page():
                             st.error("변경 실패 (시스템 오류)")
                     else:
                         st.error("현재 비밀번호가 틀렸습니다.")
-        
-        st.write("---")
-        if st.button("🚪 로그아웃", type="secondary", use_container_width=True):
-            st.session_state.logged_in = False
-            st.session_state.page = 'login'
-            if 'signup_success' in st.session_state: del st.session_state['signup_success']
-            # 세션 초기화
-            for k in list(st.session_state.keys()):
-                if k not in ['logged_in', 'page']: del st.session_state[k]
-            st.rerun()
 
 def show_quiz_page():
     try:
