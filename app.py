@@ -1191,7 +1191,7 @@ def show_quiz_page():
     # TTS 오디오 가져오기 (파일이 없으면 생성)
         audio_data = utils.text_to_speech(curr_q['id'], curr_q['sentence_en'])
         
-        # [MOBILE OPTIMIZATION] CSS & Layout
+        # [MOBILE OPTIMIZATION] CSS & Layout (Revised for Max Screen Usage)
         st.markdown("""
         <style>
             /* 기본적으로 숨김 (데스크탑에선 영향 없게) */
@@ -1205,50 +1205,69 @@ def show_quiz_page():
                     padding-bottom: 0 !important;
                 }
                 
-                /* 2. 문제 영역 고정 (Top 0 ~ 50%) */
+                /* 2. 문제 영역 (Top ~ Bottom Input Bar까지 꽉 채움) */
                 .fixed-question-box {
                     display: block;
                     position: fixed;
                     top: 0;
                     left: 0;
                     width: 100%;
-                    height: 50vh; 
+                    /* 입력창 높이(80px)만큼 뺀 나머지 전체 */
+                    height: calc(100% - 80px);
                     background-color: #ffffff;
                     z-index: 1000;
-                    padding: 15px;
-                    border-bottom: 2px solid #f0f2f6;
-                    overflow-y: auto; /* 내용 많으면 스크롤 */
+                    padding: 20px;
+                    padding-top: 60px; /* Pass 버튼 공간 확보 */
+                    overflow-y: auto;
                     box-sizing: border-box;
                 }
                 
-                /* 3. 입력창 고정 (Top 50%) */
+                /* 3. 입력창 고정 (화면 최하단) */
                 div[data-testid="stTextInput"] {
                     position: fixed;
-                    top: 50vh; 
+                    bottom: 0 !important;
+                    top: auto !important; /* 위쪽 고정 해제 */
                     left: 0;
                     width: 100% !important;
-                    background-color: #ffffff;
+                    height: 80px;
+                    background-color: #f8f9fa;
+                    border-top: 1px solid #ddd;
                     z-index: 1001;
                     padding: 10px 15px;
                     box-sizing: border-box;
-                    box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
                 }
                 
-                /* 입력창 폰트 키우기 */
+                /* 입력창 폰트 및 스타일 */
                 div[data-testid="stTextInput"] input {
                     font-size: 1.2rem !important;
-                    padding: 12px !important;
+                    padding: 10px !important;
+                    background-color: white !important;
                 }
 
-                /* 4. 데스크탑용 요소 숨기기 (모바일 전용 박스를 사용하므로) */
+                /* 4. 데스크탑용 요소 숨기기 */
                 .desktop-only { display: none !important; }
                 
-                /* 5. 버튼 위치 조정 (키보드 위 또는 아래) */
-                /* 입력창(Top 50% + Height 약 8~10%) 아래에 위치 */
-                .stButton {
-                    margin-top: 65vh !important; 
-                    padding: 0 15px;
+                /* 5. Pass 버튼 (우측 상단 고정) - 공간 절약 */
+                /* answering 상태일 때만 적용됨 (success일 땐 Next 버튼이 됨) */
+                .stButton button {
+                    position: fixed !important;
+                    top: 10px !important;
+                    right: 15px !important;
+                    width: auto !important;
+                    z-index: 2001 !important;
+                    background-color: rgba(255, 255, 255, 0.9) !important;
+                    border: 1px solid #ccc !important;
+                    color: #555 !important;
+                    font-size: 0.8rem !important;
+                    padding: 5px 12px !important;
+                    border-radius: 20px !important;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
                 }
+                /* Success 화면의 Primary 버튼(다음 문제)은 하단에 고정하고 싶다면? 
+                   일단 Pass 버튼 위주로 최적화. Next 버튼은 아래 로직에서 별도 처리 안하면 우상단 감.
+                   Next 버튼은 큼직하게 누르기 편해야 하므로... 
+                   하지만 일단 "answering" 상태의 input focus 시점이 중요하므로 이대로 진행.
+                */
             }
         </style>
         """, unsafe_allow_html=True)
