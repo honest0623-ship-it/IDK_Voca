@@ -89,7 +89,17 @@ def main():
     # [NEW] 새로고침/뒤로가기 방지 및 하단 버튼 강제 제거 스크립트
     components.html("""
         <script>
-            // 1. 뒤로가기 방지
+            // 1. 뒤로가기 방지 (History Trap)
+            try {
+                history.pushState(null, document.title, location.href);
+                window.addEventListener('popstate', function (event) {
+                    history.pushState(null, document.title, location.href);
+                });
+            } catch (e) {
+                console.log("History Trap Error: " + e);
+            }
+
+            // 2. 새로고침/닫기 방지 경고
             try {
                 window.parent.addEventListener('beforeunload', function (e) {
                     e.preventDefault();
@@ -99,7 +109,7 @@ def main():
                 console.log("Prevention Script Error: " + err);
             }
 
-            // 2. [Mobile Fix] Streamlit Cloud UI 강제 제거 (0.3초마다 실행)
+            // 3. [Mobile Fix] Streamlit Cloud UI 강제 제거 (0.3초마다 실행)
             function killStreamlitUI() {
                 try {
                     // (1) 텍스트/링크 기반 제거
