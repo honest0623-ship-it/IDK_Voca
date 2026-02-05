@@ -501,8 +501,17 @@ def handle_session_end(username, progress_df, today):
                             st.rerun()
                     return # 여기서 중단하고 사용자 반응 대기
                 else:
-                    # 레벨 유지 시
-                    st.info(f"📊 레벨 평가 결과: {msg} (다음 평가까지: {20 - remainder_qs}문제)")
+                    # [CHANGE] 레벨 유지 시에도 명확한 결과 창 표시 (자동 넘어감 방지)
+                    with st.container(border=True):
+                        st.markdown(f"<h3 style='text-align: center;'>📊 레벨 평가 결과</h3>", unsafe_allow_html=True)
+                        st.info(msg)
+                        st.write(f"**Level {current_level} 유지**")
+                        st.caption(f"다음 평가까지: {20 - remainder_qs}문제")
+                        
+                        if st.button("확인", key="btn_lv_keep", use_container_width=True):
+                            st.session_state.page = 'dashboard'
+                            st.rerun()
+                    return
             else:
                 # 로그가 부족한 경우 (혹시 모를 예외)
                  utils.update_user_dynamic_fields(username, {'qs_count': total_qs_accumulated})
@@ -803,7 +812,7 @@ def show_admin_page():
                 filtered_df = df_voca
                 
             st.caption(f"총 {len(filtered_df)}개의 단어가 표시됩니다.")
-            st.dataframe(filtered_df[['id', 'target_word', 'meaning', 'level']], use_container_width=True, height=200)
+            st.dataframe(filtered_df[['id', 'root_word', 'target_word', 'meaning', 'level']], use_container_width=True, height=200, hide_index=True)
             
             # 2. 단어 수정/삭제
             st.write("---")
@@ -818,29 +827,31 @@ def show_admin_page():
                     if not word_row.empty:
                         word_data = word_row.iloc[0]
                         with st.form("edit_word_form"):
-                            e_word = st.text_input("영어 단어", value=word_data['target_word'])
-                            e_mean = st.text_input("뜻", value=word_data['meaning'])
-                            e_lv = st.number_input("레벨", min_value=1, max_value=30, value=int(word_data['level']))
-                            e_sen_en = st.text_area("예문 (En)", value=word_data['sentence_en'])
-                            e_sen_ko = st.text_input("예문 해석 (Ko)", value=word_data['sentence_ko'])
-                            e_root = st.text_input("원형 (Root)", value=word_data.get('root_word', ''))
+                            e_word = st.text_input("영어 단어", value=word_data['target_word'], key=f"edit_word_{target_id}")
+                            e_mean = st.text_input("뜻", value=word_data['meaning'], key=f"edit_mean_{target_id}")
+                            e_lv = st.number_input("레벨", min_value=1, max_value=30, value=int(word_data['level']), key=f"edit_lv_{target_id}")
+                            e_sen_en = st.text_area("예문 (En)", value=word_data['sentence_en'], key=f"edit_en_{target_id}")
+                            e_sen_ko = st.text_input("예문 해석 (Ko)", value=word_data['sentence_ko'], key=f"edit_ko_{target_id}")
+                            e_root = st.text_input("원형 (Root)", value=str(word_data.get('root_word') or ''), key=f"edit_root_{target_id}")
                             
                             c_edit_btn, c_del_btn = st.columns(2)
                             with c_edit_btn:
                                 if st.form_submit_button("💾 수정 저장", type="primary", use_container_width=True):
                                     if utils.update_word(target_id, e_word, e_mean, e_lv, e_sen_en, e_sen_ko, e_root):
+                                        st.cache_data.clear() # [FIX] 즉시 반영을 위해 캐시 초기화
                                         drive_sync.upload_db_to_drive()
-                                        st.success("수정 완료!")
-                                        time.sleep(1)
+                                        st.toast("✅ 수정되었습니다!") # [FIX] 팝업 메시지
+                                        time.sleep(0.5) # 잠시 대기 후 리로딩
                                         st.rerun()
                                     else:
                                         st.error("수정 실패")
                             with c_del_btn:
                                 if st.form_submit_button("🗑️ 삭제", type="secondary", use_container_width=True):
                                     if utils.delete_word(target_id):
+                                        st.cache_data.clear() # [FIX] 즉시 반영
                                         drive_sync.upload_db_to_drive()
-                                        st.success("삭제 완료!")
-                                        time.sleep(1)
+                                        st.toast("✅ 삭제되었습니다!")
+                                        time.sleep(0.5)
                                         st.rerun()
                                     else:
                                         st.error("삭제 실패")
@@ -863,9 +874,10 @@ def show_admin_page():
                             st.warning("단어와 뜻은 필수입니다.")
                         else:
                             if utils.add_word(n_word, n_mean, n_lv, n_sen_en, n_sen_ko, n_root):
+                                st.cache_data.clear() # [FIX] 즉시 반영
                                 drive_sync.upload_db_to_drive()
-                                st.success(f"'{n_word}' 추가 완료!")
-                                time.sleep(1)
+                                st.toast(f"✅ '{n_word}' 추가 완료!")
+                                time.sleep(0.5)
                                 st.rerun()
                             else:
                                 st.error("추가 실패")
@@ -1192,6 +1204,37 @@ def show_quiz_page():
 
         # [MOBILE OPTIMIZED] 컬럼 제거하고 컨테이너 사용 (CSS로 중앙 정렬됨)
         st.markdown("<h2 style='text-align: center;'>🚀 일등급 영어 단어 챌린지</h2>", unsafe_allow_html=True)
+        
+        # [NEW] 중간 저장 및 나가기
+        if st.button("💾 저장 후 대시보드 (Save & Quit)", use_container_width=True, key="btn_early_quit"):
+            with st.spinner("학습 기록을 저장하고 있습니다..."):
+                # 1. 진도표 저장
+                if 'user_progress_df' in st.session_state:
+                    utils.save_progress_fast(username, st.session_state.user_progress_df)
+                
+                # 2. 학습 로그 저장
+                if 'study_log_buffer' in st.session_state and st.session_state.study_log_buffer:
+                    utils.batch_log_study_results(st.session_state.study_log_buffer)
+                    st.session_state.study_log_buffer = []
+
+                # 3. 상태 동기화 (Pending Wrongs / Session)
+                updates = {}
+                if 'pending_wrongs_local' in st.session_state:
+                    updates['pending_wrongs'] = ",".join(str(x) for x in st.session_state.pending_wrongs_local)
+                if 'pending_session_local' in st.session_state:
+                    updates['pending_session'] = ",".join(str(x) for x in st.session_state.pending_session_local)
+                
+                if updates:
+                    utils.update_user_dynamic_fields(username, updates)
+                
+                # 4. 백업
+                drive_sync.upload_db_to_drive()
+            
+            st.success("저장 완료!")
+            time.sleep(0.5)
+            st.session_state.page = 'dashboard'
+            st.rerun()
+
         st.write("")
 
         if 'full_quiz_list' not in st.session_state:
@@ -1436,15 +1479,12 @@ def show_quiz_page():
             st.write(f"**Question {idx + 1} / {len(st.session_state.quiz_list)}**")
             st.progress(progress_pct / 100)
             with st.container(border=True):
-                # 결과에 따른 메시지 분기
-                if st.session_state.get("last_result") == "gave_up":
-                    st.error(f"❌ 아쉽네요. 정답은 **{target}** 입니다.")
+                # [CHANGE] 포기 후 정답 입력 시에도 '정답!' 메시지 출력으로 통일
+                root = curr_q.get('root_word', '')
+                if root and isinstance(root, str) and root.strip() and root.lower() != target.lower():
+                    st.success(f"✅ 정답! **{target}** (원형: {root})")
                 else:
-                    root = curr_q.get('root_word', '')
-                    if root and isinstance(root, str) and root.strip() and root.lower() != target.lower():
-                        st.success(f"✅ 정답! **{target}** (원형: {root})")
-                    else:
-                        st.success(f"✅ 정답! **{target}**")
+                    st.success(f"✅ 정답! **{target}**")
                 
                 highlighted_html = utils.get_highlighted_sentence(curr_q['sentence_en'], target)
                 st.markdown(f"""<div class="success-sentence-box">{highlighted_html}</div>""", unsafe_allow_html=True)
