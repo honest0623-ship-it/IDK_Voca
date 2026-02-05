@@ -1191,90 +1191,89 @@ def show_quiz_page():
     # TTS 오디오 가져오기 (파일이 없으면 생성)
         audio_data = utils.text_to_speech(curr_q['id'], curr_q['sentence_en'])
         
-        # [MOBILE OPTIMIZATION] CSS & Layout (Fixed Scrolling & Layout)
+        # [MOBILE LAYOUT FIX] Sticky Header Approach
         st.markdown("""
         <style>
-            /* 기본적으로 숨김 */
-            .fixed-question-box { display: none; }
+            /* Sticky Header Style */
+            .sticky-header {
+                position: -webkit-sticky; /* Safari */
+                position: sticky;
+                top: 0;
+                background-color: white;
+                z-index: 999;
+                padding: 10px 0 15px 0;
+                border-bottom: 2px solid #f0f2f6;
+            }
+            /* Hide Streamlit Header for more space */
+            header { visibility: hidden; }
+            .block-container { padding-top: 1rem; }
             
-            @media screen and (max-width: 768px) {
-                /* 헤더 숨김 */
-                header { display: none !important; }
-                .block-container {
-                    padding: 0 !important;
-                    margin: 0 !important;
-                }
-                
-                /* Body 스크롤 방지 (내부 스크롤만 허용) */
-                body {
-                    overscroll-behavior: none;
-                }
-
-                /* 1. 문제 영역: 상단 0부터 하단 85px(입력창 위)까지 꽉 채움 */
-                .fixed-question-box {
-                    display: block;
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    right: 0;
-                    bottom: 85px; /* 입력창 높이만큼 남김 */
-                    background-color: #ffffff;
-                    z-index: 1000;
-                    padding: 20px;
-                    padding-top: 60px; /* Pass 버튼 공간 */
-                    padding-bottom: 20px;
-                    
-                    /* 스크롤 필수 설정 */
-                    overflow-y: scroll !important; 
-                    -webkit-overflow-scrolling: touch;
-                }
-                
-                /* 2. 입력창: 화면 최하단 고정 */
-                div[data-testid="stTextInput"] {
-                    position: fixed;
-                    bottom: 0 !important;
-                    top: auto !important;
-                    left: 0;
-                    width: 100% !important;
-                    height: 85px;
-                    background-color: #f8f9fa;
-                    border-top: 1px solid #ddd;
-                    z-index: 1010; /* 문제 영역보다 위 */
-                    padding: 10px 15px;
-                    box-sizing: border-box;
-                    display: flex;
-                    align-items: center;
-                }
-                
-                div[data-testid="stTextInput"] > div {
-                    width: 100%;
-                }
-                
-                div[data-testid="stTextInput"] input {
-                    font-size: 1.2rem !important;
-                    padding: 10px !important;
-                    background-color: white !important;
-                }
-
-                /* 3. Pass 버튼 (우측 상단) */
-                .stButton button {
-                    position: fixed !important;
-                    top: 15px !important;
-                    right: 15px !important;
-                    z-index: 2000 !important;
-                    padding: 5px 10px !important;
-                    font-size: 0.8rem !important;
-                    background: rgba(255,255,255,0.9) !important;
-                    border: 1px solid #999 !important;
-                    border-radius: 15px !important;
-                    color: #333 !important;
-                    box-shadow: 0 1px 3px rgba(0,0,0,0.2) !important;
-                }
-
-                .desktop-only { display: none !important; }
+            /* Input field styling */
+            div[data-testid="stTextInput"] input {
+                font-size: 1.1rem;
+                padding: 10px;
             }
         </style>
         """, unsafe_allow_html=True)
+
+        progress_pct = (idx / len(st.session_state.quiz_list)) * 100
+        
+        if st.session_state.quiz_state == "answering":
+            # Hint & Error Logic
+            hint_html = ""
+            if st.session_state.get('gave_up_mode', False):
+                 hint_html = f"<div style='color: #d9534f; font-weight: bold; margin-top: 10px;'>❌ 정답: {target}<br><span style='font-size:0.8em; color:gray;'>(위 정답을 똑같이 입력하세요)</span></div>"
+                 masked_sentence = utils.get_masked_sentence(curr_q['sentence_en'], target, curr_q.get('root_word')) 
+            else:
+                 masked_sentence = utils.get_masked_sentence(curr_q['sentence_en'], target, curr_q.get('root_word'))
+
+            error_html = ""
+            if st.session_state.retry_mode and not st.session_state.get('gave_up_mode', False):
+                error_html = f"<div style='background: #f8d7da; color: #721c24; padding: 8px; border-radius: 5px; margin-top: 10px; font-weight: bold;'>❌ 틀렸습니다. 다시 시도!</div>"
+
+            # Construct HTML (Left-aligned to prevent code block rendering)
+            sticky_content = f"""
+<div class="sticky-header">
+    <div style="font-size: 0.85em; color: #666; display: flex; justify-content: space-between; margin-bottom: 5px;">
+        <span>Question {idx + 1}</span>
+        <span>{len(st.session_state.quiz_list)}</span>
+    </div>
+    <div style="width: 100%; background-color: #e9ecef; height: 6px; border-radius: 3px; margin-bottom: 15px;">
+        <div style="width: {progress_pct}%; background-color: #ff4b4b; height: 6px; border-radius: 3px;"></div>
+    </div>
+    <div style="font-size: 1.2em; font-weight: bold; color: #333; margin-bottom: 5px;">💡 {curr_q['meaning']}</div>
+    <div style="font-size: 1em; color: #555;">📖 {curr_q['sentence_ko']}</div>
+    <div style="background: #e8f0fe; color: #1a73e8; padding: 12px; border-radius: 8px; margin-top: 12px; font-weight: 500; font-size: 1.1em; line-height: 1.4;">
+        {masked_sentence}
+    </div>
+    {hint_html}
+    {error_html}
+</div>
+"""
+            st.markdown(sticky_content, unsafe_allow_html=True)
+
+            # Input Field (Natural Flow)
+            input_key = f"quiz_in_{idx}_{st.session_state.retry_mode}_{st.session_state.get('gave_up_mode', False)}"
+            default_val = st.session_state.get('last_wrong_input', "") if (st.session_state.retry_mode and not st.session_state.get('gave_up_mode', False)) else ""
+            
+            placeholder_text = "정답 입력 후 엔터" if not st.session_state.get('gave_up_mode', False) else "위 정답을 똑같이 입력 후 엔터"
+            
+            st.text_input("정답 입력", value=default_val, key=input_key, label_visibility="collapsed", placeholder=placeholder_text, 
+                          on_change=check_answer_callback, args=(username, curr_q, target, today))
+            
+            # Pass Button (Natural Flow)
+            if not st.session_state.get('gave_up_mode', False):
+                if st.button("🤷‍♂️ 정답을 모르겠어요 (Pass)", type="secondary", use_container_width=True, 
+                             on_click=give_up_callback, args=(username, curr_q, today)):
+                    pass
+                
+            utils.focus_element("input")
+
+        elif st.session_state.quiz_state == "success":
+            st.write(f"**Question {idx + 1} / {len(st.session_state.quiz_list)}**")
+            st.progress(progress_pct / 100)
+            with st.container(border=True):
+
 
         # 진행률 계산
         progress_pct = (idx / len(st.session_state.quiz_list)) * 100
