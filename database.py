@@ -504,12 +504,16 @@ def delete_word(word_id):
         conn.close()
 
 def bulk_upsert_words(df):
-    """엑셀 데이터 일괄 업로드 (추가 및 수정)"""
+    """엑셀 데이터 일괄 업로드 (Target Word 기준 Upsert)"""
     conn = get_db_connection()
     c = conn.cursor()
     try:
         count_added = 0
         count_updated = 0
+        
+        # 1. 기존 단어 매핑 가져오기 (target_word -> id)
+        c.execute("SELECT id, target_word FROM voca_db")
+        existing_words = {row['target_word']: row['id'] for row in c.fetchall()}
         
         for _, row in df.iterrows():
             # 필수 컬럼 체크
@@ -523,19 +527,18 @@ def bulk_upsert_words(df):
             sentence_ko = row.get('sentence_ko', '')
             root_word = row.get('root_word', '')
             
-            # ID가 있으면 수정, 없으면 추가
-            word_id = row.get('id')
-            
-            if pd.notna(word_id) and str(word_id).isdigit() and int(word_id) > 0:
-                # ID가 존재하면 업데이트
+            # Target Word 존재 여부 확인
+            if target_word in existing_words:
+                # 존재하면 UPDATE (ID 기반)
+                word_id = existing_words[target_word]
                 c.execute('''
                     UPDATE voca_db 
-                    SET target_word=?, meaning=?, level=?, sentence_en=?, sentence_ko=?, root_word=?
+                    SET meaning=?, level=?, sentence_en=?, sentence_ko=?, root_word=?
                     WHERE id=?
-                ''', (target_word, meaning, level, sentence_en, sentence_ko, root_word, int(word_id)))
+                ''', (meaning, level, sentence_en, sentence_ko, root_word, word_id))
                 count_updated += 1
             else:
-                # ID가 없으면 신규 추가
+                # 없으면 INSERT
                 c.execute('''
                     INSERT INTO voca_db (target_word, meaning, level, sentence_en, sentence_ko, root_word)
                     VALUES (?, ?, ?, ?, ?, ?)
