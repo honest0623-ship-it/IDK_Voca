@@ -9,6 +9,7 @@ import streamlit.components.v1 as components
 import time
 import textwrap
 import drive_sync # [NEW] 동기화 모듈
+import io
 
 # --- 화면 렌더링 함수 (메인 진입점) ---
 def main():
@@ -841,6 +842,44 @@ def show_admin_page():
     with tab3:
         st.subheader("📚 단어 데이터베이스 관리")
         
+        # [NEW] 엑셀 일괄 관리 기능
+        with st.expander("📂 엑셀로 단어 일괄 관리 (다운로드/업로드)", expanded=False):
+            c_down, c_up = st.columns(2)
+            
+            with c_down:
+                st.markdown("#### 1️⃣ 현재 DB 다운로드")
+                df_current = utils.load_data()
+                if df_current is not None:
+                    # 엑셀 변환
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                        df_current.to_excel(writer, index=False, sheet_name='VocaDB')
+                    processed_data = output.getvalue()
+                    
+                    st.download_button(label="📥 엑셀 파일 다운로드 (.xlsx)",
+                                       data=processed_data,
+                                       file_name=f"voca_db_backup_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                       use_container_width=True)
+            
+            with c_up:
+                st.markdown("#### 2️⃣ 엑셀 파일 업로드")
+                uploaded_file = st.file_uploader("수정한 엑셀 파일을 이곳에 드래그하세요", type=['xlsx'])
+                if uploaded_file is not None:
+                    if st.button("📤 DB에 반영하기", type="primary", use_container_width=True):
+                        with st.spinner("데이터 처리 중..."):
+                            success, msg = utils.process_excel_upload(uploaded_file)
+                            if success:
+                                st.cache_data.clear()
+                                drive_sync.upload_db_to_drive()
+                                st.success(msg)
+                                time.sleep(2)
+                                st.rerun()
+                            else:
+                                st.error(msg)
+        
+        st.divider()
+
         # 1. 검색 및 목록
         search_query = st.text_input("단어 검색 (영어 또는 한글 뜻)", placeholder="검색어 입력...")
         df_voca = utils.load_data()

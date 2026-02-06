@@ -471,6 +471,14 @@ def get_random_question(level, exclude_ids=[]):
 
     if candidates.empty:
         return None
+    
+    # [FIX] 품질 개선: "The word '...' is important." 같은 더미 문장 제외 우선순위 적용
+    # 정규식으로 더미 패턴 확인 (The word '...' is important.)
+    dummy_pattern = r"^The word '.*' is important\.$"
+    good_candidates = candidates[~candidates['sentence_en'].str.contains(dummy_pattern, regex=True, na=False)]
+    
+    if not good_candidates.empty:
+        return good_candidates.sample(n=1).iloc[0].to_dict()
         
     return candidates.sample(n=1).iloc[0].to_dict()
 
@@ -666,3 +674,18 @@ def update_word(word_id, target_word, meaning, level, sentence_en, sentence_ko, 
 def delete_word(word_id):
     """단어 삭제"""
     return db.delete_word(word_id)
+
+def process_excel_upload(file):
+    """엑셀 파일 업로드 처리"""
+    try:
+        df = pd.read_excel(file)
+        # 컬럼 이름 공백 제거
+        df.columns = [str(c).strip() for c in df.columns]
+        
+        if 'target_word' not in df.columns or 'meaning' not in df.columns:
+            return False, "엑셀 파일에 'target_word'와 'meaning' 컬럼이 반드시 있어야 합니다."
+            
+        added, updated = db.bulk_upsert_words(df)
+        return True, f"✅ 처리 완료: {added}개 추가, {updated}개 수정됨"
+    except Exception as e:
+        return False, f"오류 발생: {e}"
