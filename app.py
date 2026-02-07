@@ -814,25 +814,9 @@ def show_admin_page():
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["👥 학생 관리", "🏆 학습 랭킹", "📚 단어 DB 관리", "⚖️ 레벨 자동 조정", "⚙️ 시스템 설정", "💾 DB 백업/복구"])
     
     with tab1:
-        st.subheader("학생 명단 및 관리")
         users = utils.get_all_users()
         if not users.empty:
-            st.dataframe(users[['username', 'name', 'level']], use_container_width=True)
-            
-            # [NEW] 전체 유저 데이터 다운로드 (백업용)
-            full_users = utils.get_full_users_dump()
-            if not full_users.empty:
-                csv = full_users.to_csv(index=False).encode('utf-8-sig')
-                st.download_button(
-                    label="📥 전체 학생 정보 다운로드 (CSV Backup)",
-                    data=csv,
-                    file_name=f"users_backup_{datetime.now().strftime('%Y%m%d')}.csv",
-                    mime='text/csv',
-                    key='btn_download_users_csv'
-                )
-            
-            st.write("---")
-            st.subheader("🛠 학생 정보 수정 및 삭제")
+            st.subheader("🛠 학생 정보 관리 (수정 / 비번 초기화 / 삭제)")
             
             # 학생 선택
             selected_user_id = st.selectbox("관리할 학생 선택", users['username'].tolist())
@@ -841,7 +825,7 @@ def show_admin_page():
                 # 선택된 학생의 현재 정보 가져오기
                 current_info = users[users['username'] == selected_user_id].iloc[0]
                 
-                with st.form("edit_student_form"):
+                with st.form("student_manage_form"):
                     c1, c2, c3 = st.columns(3)
                     with c1:
                         new_id = st.text_input("아이디 (ID)", value=current_info['username'])
@@ -849,14 +833,12 @@ def show_admin_page():
                         new_name = st.text_input("이름", value=current_info['name'])
                     with c3:
                         new_level = st.number_input("레벨", min_value=1, max_value=30, value=int(current_info['level']) if pd.notna(current_info['level']) and str(current_info['level']).isdigit() else 1)
-                        
-                    c_edit, c_del = st.columns([1, 1])
-                    with c_edit:
-                        submit_edit = st.form_submit_button("💾 정보 수정 저장", type="primary", use_container_width=True)
-                    with c_del:
-                        submit_del = st.form_submit_button("🗑️ 학생 삭제 (복구 불가)", type="secondary", use_container_width=True)
                     
-                    if submit_edit:
+                    st.write("") 
+                    # 정보 수정 버튼만 폼 안에 배치 (Submit 역할)
+                    btn_save = st.form_submit_button("💾 정보 수정 저장", type="primary", use_container_width=True)
+                    
+                    if btn_save:
                         if not new_id or not new_name:
                             st.warning("아이디와 이름은 필수입니다.")
                         else:
@@ -870,31 +852,73 @@ def show_admin_page():
                                 st.error("❌ 이미 존재하는 아이디입니다.")
                             else:
                                 st.error(f"❌ 수정 실패: {res}")
-                                
-                    if submit_del:
-                        if utils.delete_student(selected_user_id):
-                            drive_sync.upload_db_to_drive() # 백업
-                            st.success(f"✅ {selected_user_id} 학생 및 관련 기록이 삭제되었습니다.")
-                            time.sleep(1)
+
+                # 폼 밖으로 비번 초기화 및 삭제 버튼 이동 (버그 방지 및 기능 분리)
+                c_reset, c_del = st.columns(2)
+                with c_reset:
+                    btn_reset = st.button("🔐 비번 초기화 (1234)", use_container_width=True, key="btn_reset_student_pw_outside")
+                with c_del:
+                    btn_del = st.button("🗑️ 학생 삭제", type="secondary", use_container_width=True, key="btn_del_student_trigger_outside")
+                
+                if btn_reset:
+                    st.session_state['reset_verification'] = {
+                        'id': selected_user_id,
+                        'name': current_info['name']
+                    }
+
+                if btn_del:
+                    st.session_state['delete_verification'] = {
+                        'id': selected_user_id,
+                        'name': current_info['name']
+                    }
+
+                # 비밀번호 초기화 확인 메시지 및 버튼 (Form 밖에서 처리)
+                if 'reset_verification' in st.session_state and st.session_state['reset_verification']['id'] == selected_user_id:
+                    reset_info = st.session_state['reset_verification']
+                    st.warning(f"🔐 정말 비밀번호를 초기화하시겠습니까?\n\n학생: {reset_info['name']} (ID: {reset_info['id']})\n\n비밀번호가 '1234'로 변경됩니다.")
+                    
+                    col_confirm_reset_1, col_confirm_reset_2 = st.columns(2)
+                    with col_confirm_reset_1:
+                        if st.button("✅ 예, 초기화합니다", type="primary", use_container_width=True, key="btn_confirm_reset"):
+                            success = utils.reset_user_password(selected_user_id, '1234')
+                            if success:
+                                drive_sync.upload_db_to_drive() # [NEW] 백업
+                                del st.session_state['reset_verification']
+                                st.success(f"✅ {selected_user_id} 학생 비밀번호 초기화 완료!")
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("초기화 실패")
+                    with col_confirm_reset_2:
+                        if st.button("❌ 취소", use_container_width=True, key="btn_cancel_reset"):
+                            del st.session_state['reset_verification']
                             st.rerun()
-                        else:
-                            st.error("삭제 실패")
+
+                # 삭제 확인 메시지 및 버튼 (Form 밖에서 처리)
+                if 'delete_verification' in st.session_state and st.session_state['delete_verification']['id'] == selected_user_id:
+                    del_info = st.session_state['delete_verification']
+                    st.error(f"⚠️ 정말 삭제하시겠습니까?\n\n학생: {del_info['name']} (ID: {del_info['id']})\n\n삭제 시 모든 학습 기록이 영구적으로 제거됩니다.")
+                    
+                    col_confirm_1, col_confirm_2 = st.columns(2)
+                    with col_confirm_1:
+                        if st.button("✅ 예, 삭제합니다", type="primary", use_container_width=True, key="btn_confirm_del"):
+                            if utils.delete_student(selected_user_id):
+                                drive_sync.upload_db_to_drive() # 백업
+                                del st.session_state['delete_verification']
+                                st.success(f"✅ {selected_user_id} 학생 및 관련 기록이 삭제되었습니다.")
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("삭제 실패")
+                    with col_confirm_2:
+                        if st.button("❌ 취소", use_container_width=True, key="btn_cancel_del"):
+                            del st.session_state['delete_verification']
+                            st.rerun()
 
             st.write("---")
-            st.subheader("🔐 비밀번호 초기화")
-            col_sel, col_btn = st.columns([3, 1])
-            with col_sel:
-                # 위에서 선택한 학생을 기본값으로 사용
-                reset_target = st.text_input("초기화 대상 (자동 입력)", value=selected_user_id, disabled=True)
-            with col_btn:
-                st.write("")
-                if st.button("비밀번호 '1234'로 초기화", type="primary", use_container_width=True):
-                    success = utils.reset_user_password(selected_user_id, '1234')
-                    if success:
-                        drive_sync.upload_db_to_drive() # [NEW] 백업
-                        st.success(f"✅ {selected_user_id} 학생 비밀번호 초기화 완료!")
-                    else:
-                        st.error("초기화 실패")
+            
+            st.subheader("학생 명단 및 관리")
+            st.dataframe(users[['username', 'name', 'level']], use_container_width=True)
         else:
             st.info("가입된 학생이 없습니다.")
 
@@ -1136,44 +1160,7 @@ def show_admin_page():
                         else:
                             st.error(msg)
         
-        # 2. 백업 목록 및 복구
-        st.divider()
-        st.subheader("🕰️ 백업 기록 (최근 20개)")
-        
-        try:
-            with st.spinner("백업 목록을 불러오는 중..."):
-                backups = drive_sync.list_backups(limit=20)
-            
-            if backups:
-                for file in backups:
-                    # 파일 정보 파싱
-                    created = file.get('createdTime', '')
-                    try:
-                        # ISO 8601 parsing (simple)
-                        created_dt = created.replace('T', ' ').split('.')[0]
-                    except:
-                        created_dt = created
-                    
-                    size_kb = int(file.get('size', 0)) / 1024
-                    
-                    with st.expander(f"📄 {file['name']} | 📅 {created_dt} | 💾 {size_kb:.1f} KB"):
-                        st.write(f"**파일 ID:** `{file['id']}`")
-                        
-                        c_res, c_empty = st.columns([1, 3])
-                        with c_res:
-                            if st.button("♻️ 이 버전으로 복구", key=f"restore_{file['id']}", type="secondary"):
-                                with st.spinner("복구 중..."):
-                                    if drive_sync.restore_backup(file['id']):
-                                        st.cache_data.clear()
-                                        st.success("✅ 복구 완료! 잠시 후 시스템이 재시작됩니다.")
-                                        time.sleep(2)
-                                        st.rerun()
-                                    else:
-                                        st.error("복구 실패")
-            else:
-                st.info("저장된 백업 파일이 없습니다.")
-        except Exception as e:
-            st.error(f"백업 목록 로드 실패: {e}")
+
 
 def show_level_test_page():
     st.markdown("""
