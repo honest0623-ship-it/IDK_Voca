@@ -221,3 +221,55 @@ def upload_db_to_drive():
     except Exception as e:
         print(f"Upload Error: {e}")
         return False
+
+if __name__ == "__main__":
+    print("🚀 수동 백업을 시작합니다...")
+    # Streamlit secrets load workaround for standalone script
+    # Note: Using st.secrets might fail if not running via streamlit, so we manually load toml if needed
+    try:
+        if not st.secrets:
+            raise ValueError("Secrets not loaded")
+    except:
+        import toml
+        secrets_path = os.path.join(".streamlit", "secrets.toml")
+        if os.path.exists(secrets_path):
+            with open(secrets_path, "r", encoding="utf-8") as f:
+                # Mock st.secrets
+                # Note: st.secrets is a specialized object, but for this script's usage (dict access), a dict should suffice
+                # However, st.secrets is read-only. We might need to patch the function or rely on the fact 
+                # that get_drive_service accesses st.secrets.
+                # Actually, st.secrets is a property. We can't easily overwrite it if it's not initialized.
+                # Instead, we can monkey-patch get_drive_service or just load it into a global variable 
+                # and have get_drive_service check that too.
+                # For simplicity, let's just patch st.secrets if it's empty or fails.
+                
+                # Direct injection into st.secrets is not possible easily. 
+                # Let's modify get_drive_service to look for a global var if st.secrets fails or is empty.
+                pass
+        else:
+            print("❌ .streamlit/secrets.toml 파일을 찾을 수 없습니다.")
+            exit(1)
+
+    # Re-defining get_drive_service context for standalone run if needed
+    # But since we can't easily mock st.secrets, let's just accept that 
+    # the user might need to run this with `streamlit run drive_sync.py` 
+    # OR we use the approach from run_backup_now.py which loads secrets manually.
+    
+    # Let's adapt the manual loading from run_backup_now.py here.
+    
+    import toml
+    secrets_path = os.path.join(".streamlit", "secrets.toml")
+    if os.path.exists(secrets_path):
+        with open(secrets_path, "r", encoding="utf-8") as f:
+            secrets_data = toml.load(f)
+            # Monkey patch st.secrets
+            st.secrets = secrets_data
+    else:
+        print("Error: .streamlit/secrets.toml not found.")
+        exit(1)
+
+    result = upload_db_to_drive()
+    if result:
+        print(f"✅ {result[1]}")
+    else:
+        print("❌ 백업 실패")
