@@ -1738,13 +1738,13 @@ def show_quiz_page():
         <style>
             /* Hide Streamlit Header */
             header { visibility: hidden; }
-            .block-container { padding-top: 1rem; max-width: 700px; margin: 0 auto; }
+            .block-container { padding-top: 3.5rem; max-width: 700px; margin: 0 auto; }
             
             /* Sticky Game Area */
             .quiz-container {
                 position: -webkit-sticky; /* Safari */
                 position: sticky;
-                top: 0;
+                top: 15px;
                 background-color: white;
                 z-index: 100;
                 padding: 10px 0 10px 0;
