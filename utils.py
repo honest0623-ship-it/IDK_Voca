@@ -488,6 +488,40 @@ def get_highlighted_sentence(sentence, target_word):
     pattern = re.compile(re.escape(target_word), re.IGNORECASE)
     return pattern.sub(r"<span style='color: #E74C3C; font-weight: 900; font-size: 1.2em;'>\g<0></span>", sentence)
 
+def get_bolded_korean_meaning(sentence_ko, meaning):
+    """
+    한글 뜻(meaning)에 포함된 단어가 예문 해석(sentence_ko)에 있으면 볼드체 처리
+    meaning: "존경/관심" -> "존경", "관심"으로 분리하여 매칭 시도
+    """
+    if not isinstance(sentence_ko, str) or not isinstance(meaning, str):
+        return sentence_ko
+    
+    # 1. 의미 키워드 분리 (/, , ( ) 등 제거 혹은 분리)
+    # 괄호 안의 내용도 별도 키워드로 볼지, 아니면 제거할지?
+    # 일단 구분자 /, , 로 나눔
+    keywords = re.split(r'[,/]', meaning)
+    
+    # 공백 제거 및 빈 문자열 제외
+    clean_keywords = [k.strip() for k in keywords if k.strip()]
+    
+    # 2. 매칭 정확도를 위해 긴 단어부터 정렬 (존경심 vs 존경 -> 존경심 먼저 매칭)
+    clean_keywords.sort(key=len, reverse=True)
+    
+    if not clean_keywords:
+        return sentence_ko
+        
+    # 3. 정규식 패턴 생성
+    escaped = [re.escape(k) for k in clean_keywords]
+    pattern_str = '|'.join(escaped)
+    
+    # 4. 치환 (<b> 태그 사용)
+    try:
+        pattern = re.compile(f"({pattern_str})", re.IGNORECASE)
+        # 매칭된 그룹(\1)을 <b>...</b>로 감쌈
+        return pattern.sub(r"<b>\1</b>", sentence_ko)
+    except:
+        return sentence_ko
+
 def focus_element(target_type="input"):
     """
     JS를 이용해 지정된 요소(input 또는 button)에 포커스를 강제로 위치시킴.

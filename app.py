@@ -750,53 +750,15 @@ def show_login_page():
     with st.expander("👨‍🏫 관리자 메뉴 (데이터 복구 & 접속)"):
         st.caption("DB 동기화나 관리자 페이지 접속은 인증이 필요합니다.")
         
-        # 관리자 인증 전
-        if not st.session_state.get('temp_admin_verified', False):
-            admin_pw_input = st.text_input("관리자 비밀번호", type="password", key="login_admin_pw")
-            if st.button("확인", key="btn_verify_admin"):
-                config = utils.get_system_config()
-                if admin_pw_input == config.get('admin_pw', ''):
-                    st.session_state.temp_admin_verified = True
-                    st.rerun()
-                else:
-                    st.error("❌ 비밀번호가 틀렸습니다.")
-        
-        # 관리자 인증 후
-        else:
-            st.success("✅ 관리자 인증 완료")
-            
-            # DB 상태 표시
-            if os.path.exists("voca.db"):
-                size_kb = os.path.getsize("voca.db") / 1024
-                mtime = datetime.fromtimestamp(os.path.getmtime("voca.db")).strftime('%Y-%m-%d %H:%M:%S')
-                st.info(f"📁 현재 DB 상태: {size_kb:.1f} KB (수정: {mtime})")
-            
-            st.markdown("---")
-            st.markdown("**🔄 데이터 동기화 (구글 드라이브)**")
-            
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("☁️ 데이터 가져오기 (복구)", use_container_width=True):
-                    with st.spinner("구글 드라이브에서 다운로드 중..."):
-                        if drive_sync.download_db_from_drive():
-                            st.success("다운로드 완료! 새로고침 하세요.")
-                            time.sleep(1)
-                            st.rerun()
-                        else:
-                            st.error("다운로드 실패")
-            with c2:
-                if st.button("📤 데이터 올리기 (백업)", use_container_width=True):
-                    with st.spinner("구글 드라이브로 업로드 중..."):
-                        if drive_sync.upload_db_to_drive():
-                            st.success("업로드 완료!")
-                        else:
-                            st.error("업로드 실패")
-            
-            st.markdown("---")
-            if st.button("🚀 관리자 대시보드 입장", type="primary", use_container_width=True):
+        # 관리자 인증 (즉시 입장)
+        admin_pw_input = st.text_input("관리자 비밀번호", type="password", key="login_admin_pw")
+        if st.button("확인", key="btn_verify_admin"):
+            config = utils.get_system_config()
+            if admin_pw_input == config.get('admin_pw', ''):
                 st.session_state.page = 'admin'
-                st.session_state.temp_admin_verified = False # 입장 후 인증 해제 (보안)
                 st.rerun()
+            else:
+                st.error("❌ 비밀번호가 틀렸습니다.")
 
     # [MOBILE KEYBOARD FIX] 하단 여백 추가 (키보드가 올라왔을 때 스크롤 가능하도록)
     st.markdown("<div style='height: 40vh;'></div>", unsafe_allow_html=True)
@@ -811,16 +773,35 @@ def show_admin_page():
     st.divider()
     
     # [CHANGE] 탭 구조 변경 (단어 DB 관리 추가)
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["👥 학생 관리", "🏆 학습 랭킹", "📚 단어 DB 관리", "⚖️ 레벨 자동 조정", "⚙️ 시스템 설정", "💾 DB 백업/복구"])
+    tab1, tab2, tab_stats, tab3, tab4, tab5, tab6 = st.tabs(["👥 학생 관리", "🏆 학습 랭킹", "📊 학습 통계", "📚 단어 DB 관리", "⚖️ 레벨 자동 조정", "⚙️ 시스템 설정", "💾 DB 백업/복구"])
     
     with tab1:
         users = utils.get_all_users()
         if not users.empty:
             st.subheader("🛠 학생 정보 관리 (수정 / 비번 초기화 / 삭제)")
             
-            # 학생 선택
-            selected_user_id = st.selectbox("관리할 학생 선택", users['username'].tolist())
+            # [NEW] 검색 기능 추가
+            search_term = st.text_input("🔍 학생 검색 (이름 또는 ID)", placeholder="검색어를 입력하세요...")
             
+            filtered_users = users
+            if search_term:
+                mask = users['name'].str.contains(search_term, case=False, na=False) | \
+                       users['username'].str.contains(search_term, case=False, na=False)
+                filtered_users = users[mask]
+            
+            selected_user_id = None
+            if not filtered_users.empty:
+                # Selectbox에 표시할 옵션 생성 (이름 + ID)
+                user_options = filtered_users.apply(lambda x: f"{x['name']} ({x['username']})", axis=1).tolist()
+                
+                # 선택된 옵션에서 ID 추출
+                selected_option = st.selectbox("관리할 학생 선택", user_options)
+                
+                # "이름 (ID)" 형식에서 ID만 추출 (마지막 괄호 안의 내용)
+                selected_user_id = selected_option.split('(')[-1].strip(')')
+            else:
+                st.warning("검색 결과가 없습니다.")
+
             if selected_user_id:
                 # 선택된 학생의 현재 정보 가져오기
                 current_info = users[users['username'] == selected_user_id].iloc[0]
@@ -951,6 +932,97 @@ def show_admin_page():
             st.dataframe(ranking[['이름', '문제 풀이 수']], use_container_width=True)
         else:
             st.info("아직 학습 기록이 없습니다.")
+
+    with tab_stats:
+        st.subheader("📊 기간별 학습 통계")
+        
+        all_logs = utils.get_all_study_logs()
+        users = utils.get_all_users()
+        
+        if not all_logs.empty and not users.empty:
+            # 1. 데이터 전처리
+            all_logs['timestamp'] = pd.to_datetime(all_logs['timestamp'])
+            all_logs['date'] = all_logs['timestamp'].dt.date
+            
+            today = utils.get_korea_today()
+            seven_days_ago = today - timedelta(days=6) # 오늘 포함 7일
+            thirty_days_ago = today - timedelta(days=29) # 오늘 포함 30일
+            
+            # 통계 집계용 리스트
+            stats_data = []
+            
+            for _, user in users.iterrows():
+                u_id = user['username']
+                u_name = user['name']
+                
+                u_logs = all_logs[all_logs['username'] == u_id]
+                
+                # 기간별 카운트
+                count_today = len(u_logs[u_logs['date'] == today])
+                count_7days = len(u_logs[u_logs['date'] >= seven_days_ago])
+                count_30days = len(u_logs[u_logs['date'] >= thirty_days_ago])
+                
+                stats_data.append({
+                    '이름': u_name,
+                    'ID': u_id,
+                    '오늘 (Today)': count_today,
+                    '최근 7일': count_7days,
+                    '최근 30일': count_30days,
+                    '총 누적': len(u_logs)
+                })
+            
+            stats_df = pd.DataFrame(stats_data)
+            
+            # 정렬 (오늘 많이 푼 순서)
+            stats_df = stats_df.sort_values(by='오늘 (Today)', ascending=False)
+            
+            st.markdown("#### 📅 전체 학생 요약")
+            st.dataframe(
+                stats_df[['이름', '오늘 (Today)', '최근 7일', '최근 30일', '총 누적']], 
+                use_container_width=True,
+                hide_index=True
+            )
+            
+            st.divider()
+            
+            # 2. 학생 상세 분석 (차트)
+            st.markdown("#### 📈 학생별 상세 기록")
+            
+            user_options = stats_df.apply(lambda x: f"{x['이름']} ({x['ID']})", axis=1).tolist()
+            selected_stat_user = st.selectbox("학생 선택", user_options, key="stat_user_select")
+            
+            if selected_stat_user:
+                sel_id = selected_stat_user.split('(')[-1].strip(')')
+                sel_name = selected_stat_user.split('(')[0].strip()
+                
+                target_logs = all_logs[all_logs['username'] == sel_id]
+                
+                if not target_logs.empty:
+                    # 최근 30일 일별 카운트
+                    daily_counts = target_logs[target_logs['date'] >= thirty_days_ago].groupby('date').size().reset_index(name='count')
+                    
+                    # 날짜 비어있는 날도 0으로 채우기
+                    date_range = pd.date_range(start=thirty_days_ago, end=today)
+                    daily_counts['date'] = pd.to_datetime(daily_counts['date'])
+                    daily_counts = daily_counts.set_index('date').reindex(date_range, fill_value=0).reset_index()
+                    daily_counts.columns = ['날짜', '풀이 문제 수']
+                    
+                    # Altair 차트
+                    chart = alt.Chart(daily_counts).mark_bar().encode(
+                        x=alt.X('날짜', axis=alt.Axis(format='%m/%d', title='날짜')),
+                        y=alt.Y('풀이 문제 수', title='문제 수'),
+                        tooltip=['날짜', '풀이 문제 수']
+                    ).properties(
+                        title=f'{sel_name} 학생의 최근 30일 학습 추이',
+                        height=300
+                    )
+                    
+                    st.altair_chart(chart, use_container_width=True)
+                else:
+                    st.info(f"{sel_name} 학생은 아직 학습 기록이 없습니다.")
+                    
+        else:
+            st.info("데이터가 없습니다.")
 
     with tab3:
         st.subheader("📚 단어 데이터베이스 관리")
@@ -1792,6 +1864,9 @@ def show_quiz_page():
             hint_html = ""
             masked_sentence = utils.get_masked_sentence(curr_q['sentence_en'], target, curr_q.get('root_word'))
             
+            # [NEW] Bold Korean Meaning
+            bolded_ko = utils.get_bolded_korean_meaning(curr_q['sentence_ko'], curr_q['meaning'])
+            
             # [DESIGN] Replace [ ❓ ] with styled blank
             if "[ ❓ ]" in masked_sentence:
                 # [DESIGN] Dynamic blank length based on target word length
@@ -1818,7 +1893,7 @@ def show_quiz_page():
                 </div>
                 <div class="meaning-text">{curr_q['meaning']}</div>
                 <div class="english-text">{masked_sentence}</div>
-                <div class="korean-sub" style="display: block;">{curr_q['sentence_ko']}</div>
+                <div class="korean-sub" style="display: block;">{bolded_ko}</div>
                 </div>
                 {hint_html}
                 {error_html}
@@ -1846,6 +1921,7 @@ def show_quiz_page():
         elif st.session_state.quiz_state == "success":
             # [DESIGN] Success state also uses the card design
             highlighted_html = utils.get_highlighted_sentence(curr_q['sentence_en'], target)
+            bolded_ko = utils.get_bolded_korean_meaning(curr_q['sentence_ko'], curr_q['meaning'])
             
             success_content = textwrap.dedent(f"""
                 <div class="quiz-container">
@@ -1859,7 +1935,7 @@ def show_quiz_page():
                 </div>
                 <div class="meaning-text">{curr_q['meaning']}</div>
                 <div class="english-text">{highlighted_html}</div>
-                <div class="korean-sub" style="color: #495057; display: block;">{curr_q['sentence_ko']}</div>
+                <div class="korean-sub" style="color: #495057; display: block;">{bolded_ko}</div>
                 </div>
                 <div class="hint-box" style="background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb;">
                 🎉 정답입니다! {f"(원형: {curr_q['root_word']})" if curr_q.get('root_word') and curr_q['root_word'] != target else ""}
