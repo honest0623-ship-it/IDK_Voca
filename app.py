@@ -268,6 +268,9 @@ def check_answer_callback(username, curr_q, target, today):
                     # 로그 포맷: [timestamp, date, word_id, username, level, is_correct]
                     row = [timestamp, str(today), int(q_id), username, int(q_level) if q_level else 1, 1]
                     utils.batch_log_study_results([row]) # 버퍼링 없이 즉시 저장
+                    
+                    # [FIX] 단어 통계(total_try) 업데이트
+                    utils.update_word_stats(q_id, True)
 
             # [속도 개선] 메모리 상의 progress_df 사용
             if 'user_progress_df' not in st.session_state:
@@ -326,6 +329,9 @@ def give_up_callback(username, curr_q, today):
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 row = [timestamp, str(today), int(q_id), username, int(q_level) if q_level else 1, 0]
                 utils.batch_log_study_results([row])
+                
+                # [FIX] 단어 통계(total_try, total_wrong) 업데이트
+                utils.update_word_stats(q_id, False)
             
             # 2. 오답 노트 추가
             if 'pending_wrongs_local' not in st.session_state: st.session_state.pending_wrongs_local = set()
@@ -787,13 +793,25 @@ def show_admin_page():
     st.divider()
     
     # [CHANGE] 탭 구조 변경 (단어 DB 관리 추가)
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["👥 학생 관리", "🏆 학습 랭킹", "📚 단어 DB 관리", "⚖️ 레벨 자동 조정", "⚙️ 시스템 설정"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["👥 학생 관리", "🏆 학습 랭킹", "📚 단어 DB 관리", "⚖️ 레벨 자동 조정", "⚙️ 시스템 설정", "💾 DB 백업/복구"])
     
     with tab1:
         st.subheader("학생 명단 및 관리")
         users = utils.get_all_users()
         if not users.empty:
             st.dataframe(users[['username', 'name', 'level']], use_container_width=True)
+            
+            # [NEW] 전체 유저 데이터 다운로드 (백업용)
+            full_users = utils.get_full_users_dump()
+            if not full_users.empty:
+                csv = full_users.to_csv(index=False).encode('utf-8-sig')
+                st.download_button(
+                    label="📥 전체 학생 정보 다운로드 (CSV Backup)",
+                    data=csv,
+                    file_name=f"users_backup_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime='text/csv',
+                    key='btn_download_users_csv'
+                )
             
             st.write("---")
             st.subheader("🛠 학생 정보 수정 및 삭제")
@@ -1076,6 +1094,68 @@ def show_admin_page():
         if st.session_state.get('is_tomorrow_mode', False):
             fake_today = utils.get_korea_today() + timedelta(days=1)
             st.info(f"🕒 현재 시스템은 **{fake_today}** 날짜로 동작 중입니다.")
+
+    with tab6:
+        st.subheader("💾 데이터베이스 백업 및 복구")
+        st.info("현재 DB 상태를 안전하게 저장하거나, 과거 시점으로 되돌립니다.")
+        
+        # 1. 백업 생성 섹션
+        with st.container(border=True):
+            st.markdown("#### 📦 새로운 백업 생성")
+            c1, c2 = st.columns([3, 1])
+            with c1:
+                backup_note = st.text_input("백업 메모 (선택사항)", placeholder="예: 단어 100개 추가 전")
+            with c2:
+                st.write("")
+                st.write("")
+                if st.button("백업 실행", type="primary", use_container_width=True):
+                    with st.spinner("구글 드라이브에 백업 중..."):
+                        success, msg = drive_sync.create_backup(backup_note)
+                        if success:
+                            st.success(msg)
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error(msg)
+        
+        # 2. 백업 목록 및 복구
+        st.divider()
+        st.subheader("🕰️ 백업 기록 (최근 20개)")
+        
+        try:
+            with st.spinner("백업 목록을 불러오는 중..."):
+                backups = drive_sync.list_backups(limit=20)
+            
+            if backups:
+                for file in backups:
+                    # 파일 정보 파싱
+                    created = file.get('createdTime', '')
+                    try:
+                        # ISO 8601 parsing (simple)
+                        created_dt = created.replace('T', ' ').split('.')[0]
+                    except:
+                        created_dt = created
+                    
+                    size_kb = int(file.get('size', 0)) / 1024
+                    
+                    with st.expander(f"📄 {file['name']} | 📅 {created_dt} | 💾 {size_kb:.1f} KB"):
+                        st.write(f"**파일 ID:** `{file['id']}`")
+                        
+                        c_res, c_empty = st.columns([1, 3])
+                        with c_res:
+                            if st.button("♻️ 이 버전으로 복구", key=f"restore_{file['id']}", type="secondary"):
+                                with st.spinner("복구 중..."):
+                                    if drive_sync.restore_backup(file['id']):
+                                        st.cache_data.clear()
+                                        st.success("✅ 복구 완료! 잠시 후 시스템이 재시작됩니다.")
+                                        time.sleep(2)
+                                        st.rerun()
+                                    else:
+                                        st.error("복구 실패")
+            else:
+                st.info("저장된 백업 파일이 없습니다.")
+        except Exception as e:
+            st.error(f"백업 목록 로드 실패: {e}")
 
 def show_level_test_page():
     st.markdown("""

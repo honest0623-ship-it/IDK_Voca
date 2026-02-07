@@ -176,6 +176,21 @@ def save_progress_single(username, word_id, row_data):
         print(f"Wrapper Error: {e}")
         return False
 
+def update_word_stats(word_id, is_correct):
+    """단일 단어 통계 업데이트 Wrapper"""
+    try:
+        # correct: try+1, wrong+0
+        # wrong:   try+1, wrong+1
+        inc_try = 1
+        inc_wrong = 0 if is_correct else 1
+        
+        # update_vocab_stats expects list of (try_inc, wrong_inc, word_id)
+        db.update_vocab_stats([(inc_try, inc_wrong, int(word_id))])
+        return True
+    except Exception as e:
+        print(f"Stats Update Error: {e}")
+        return False
+
 def log_study_result(username, word_id, level, is_correct):
     today = get_korea_today()
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -199,6 +214,10 @@ def get_all_study_logs():
 def get_all_users():
     """모든 사용자 정보 로드 (관리자용 - SQLite)"""
     return db.get_all_users()
+
+def get_full_users_dump():
+    """모든 사용자 전체 정보 로드 (백업용 - SQLite)"""
+    return db.get_full_users_dump()
 
 def get_user_info(username):
     """사용자 정보 가져오기 (SQLite)"""

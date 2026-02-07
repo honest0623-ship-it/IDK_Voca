@@ -182,6 +182,13 @@ def get_all_users():
     conn.close()
     return df
 
+def get_full_users_dump():
+    """모든 사용자 전체 정보 로드 (백업용)"""
+    conn = get_db_connection()
+    df = pd.read_sql('SELECT * FROM users', conn)
+    conn.close()
+    return df
+
 def get_all_study_logs():
     """모든 학습 로그 로드 (관리자용)"""
     conn = get_db_connection()
