@@ -1723,7 +1723,7 @@ def show_quiz_page():
             
             .korean-sub {
                 font-size: 0.95rem;
-                color: #adb5bd;
+                color: #333333;
                 margin-top: 15px;
                 font-weight: 400;
             }
@@ -1808,14 +1808,14 @@ def show_quiz_page():
             # Construct HTML (Left-aligned to prevent code block rendering)
             sticky_content = textwrap.dedent(f"""
                 <div class="quiz-container">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 8px; color: #868e96; font-size: 0.9rem; font-weight: 500;">
-                <span>Step {idx + 1} <span style="color: #dee2e6;">|</span> Lv.{curr_q['level']}</span>
-                <span>{len(st.session_state.quiz_list)}</span>
-                </div>
-                <div class="progress-track">
-                <div class="progress-fill" style="width: {progress_pct}%;"></div>
-                </div>
                 <div class="sentence-card" style="border: 2px solid #339af0; background-color: #f1f9ff;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 0.85rem; color: #868e96; font-weight: 500;">
+                    <span>Lv.{curr_q['level']}</span>
+                    <span>{idx + 1}/{len(st.session_state.quiz_list)}</span>
+                </div>
+                <div class="progress-track" style="margin-bottom: 12px;">
+                    <div class="progress-fill" style="width: {progress_pct}%;"></div>
+                </div>
                 <div class="meaning-text">{curr_q['meaning']}</div>
                 <div class="english-text">{masked_sentence}</div>
                 <div class="korean-sub" style="display: block;">{curr_q['sentence_ko']}</div>
@@ -1849,14 +1849,14 @@ def show_quiz_page():
             
             success_content = textwrap.dedent(f"""
                 <div class="quiz-container">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 8px; color: #868e96; font-size: 0.9rem; font-weight: 500;">
-                <span>Step {idx + 1} <span style="color: #dee2e6;">|</span> Lv.{curr_q['level']}</span>
-                <span>{len(st.session_state.quiz_list)}</span>
-                </div>
-                <div class="progress-track">
-                <div class="progress-fill" style="width: {progress_pct}%;"></div>
-                </div>
                 <div class="sentence-card" style="border: 2px solid #339af0; background-color: #f1f9ff;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 0.85rem; color: #868e96; font-weight: 500;">
+                    <span>Lv.{curr_q['level']}</span>
+                    <span>{idx + 1}/{len(st.session_state.quiz_list)}</span>
+                </div>
+                <div class="progress-track" style="margin-bottom: 12px;">
+                    <div class="progress-fill" style="width: {progress_pct}%;"></div>
+                </div>
                 <div class="meaning-text">{curr_q['meaning']}</div>
                 <div class="english-text">{highlighted_html}</div>
                 <div class="korean-sub" style="color: #495057; display: block;">{curr_q['sentence_ko']}</div>
