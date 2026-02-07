@@ -143,8 +143,7 @@ def _add_months(date_obj, months: int):
     return datetime(y, m, d).date()
 
 # --- 5. 데이터 로딩 ---
-@st.cache_data(ttl=60)
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def load_data():
     """voca_db 로딩 (SQLite)"""
     return db.load_all_vocab()
@@ -675,8 +674,12 @@ def delete_word(word_id):
     """단어 삭제"""
     return db.delete_word(word_id)
 
-def process_excel_upload(file):
-    """엑셀 파일 업로드 처리"""
+def clear_all_vocabulary():
+    """모든 단어 및 진도 초기화 (학생 정보 유지)"""
+    return db.clear_vocabulary_data()
+
+def process_excel_upload(file, reset_mode=False):
+    """엑셀 파일 업로드 처리 (reset_mode=True일 경우 기존 단어 삭제)"""
     try:
         df = pd.read_excel(file)
         # 컬럼 이름 공백 제거
@@ -684,8 +687,18 @@ def process_excel_upload(file):
         
         if 'target_word' not in df.columns or 'meaning' not in df.columns:
             return False, "엑셀 파일에 'target_word'와 'meaning' 컬럼이 반드시 있어야 합니다."
+        
+        # [NEW] 초기화 모드
+        if reset_mode:
+            if not db.clear_vocabulary_data():
+                return False, "기존 데이터 초기화 실패"
             
         added, updated = db.bulk_upsert_words(df)
-        return True, f"✅ 처리 완료: {added}개 추가, {updated}개 수정됨"
+        
+        msg = f"✅ 처리 완료: {added}개 추가, {updated}개 수정됨"
+        if reset_mode:
+            msg = f"✅ 초기화 후 등록 완료: 총 {added}개 단어 등록됨"
+            
+        return True, msg
     except Exception as e:
         return False, f"오류 발생: {e}"

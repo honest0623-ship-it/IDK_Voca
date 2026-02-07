@@ -14,8 +14,8 @@ def get_db_connection():
 
 def init_db():
     """데이터베이스 초기화 (테이블 생성)"""
-    if os.path.exists(DB_FILE):
-        return # 이미 DB 파일이 있으면 실행하지 않음
+    # if os.path.exists(DB_FILE):
+    #    return # 이미 DB 파일이 있으면 실행하지 않음
 
     conn = get_db_connection()
     c = conn.cursor()
@@ -42,6 +42,7 @@ def init_db():
             id INTEGER PRIMARY KEY,
             target_word TEXT NOT NULL,
             meaning TEXT,
+            pos TEXT,
             level INTEGER DEFAULT 1,
             sentence_en TEXT,
             sentence_ko TEXT,
@@ -552,3 +553,29 @@ def bulk_upsert_words(df):
         return 0, 0
     finally:
         conn.close()
+
+def clear_vocabulary_data():
+    """단어 데이터 및 관련 진도 초기화 (학생 계정은 유지)"""
+    conn = get_db_connection()
+    try:
+        conn.execute("BEGIN TRANSACTION")
+        # 1. 테이블 삭제 (스키마 초기화를 위해)
+        conn.execute('DROP TABLE IF EXISTS user_progress')
+        conn.execute('DROP TABLE IF EXISTS study_log')
+        conn.execute('DROP TABLE IF EXISTS voca_db')
+        
+        # 2. 유저 상태 초기화 (pending_wrongs, pending_session)
+        conn.execute('UPDATE users SET pending_wrongs = "", pending_session = ""')
+        
+        conn.commit()
+        conn.close()
+        
+        # 3. 테이블 재생성
+        init_db()
+        
+        return True
+    except Exception as e:
+        # conn might be closed if commit succeeded but init_db failed? 
+        # No, close() is called.
+        print(f"Error clearing vocabulary: {e}")
+        return False

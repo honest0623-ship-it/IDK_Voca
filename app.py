@@ -239,22 +239,46 @@ def check_answer_callback(username, curr_q, target, today):
             if st.session_state.is_first_attempt and st.session_state.get("quiz_mode") == "normal":
                 # [CHANGE] 즉시 DB 저장 (중단 시 데이터 유실 방지)
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                # 로그 포맷: [timestamp, date, word_id, username, level, is_correct]
-                row = [timestamp, str(today), int(curr_q['id']), username, int(curr_q['level']), 1]
-                utils.batch_log_study_results([row]) # 버퍼링 없이 즉시 저장
+                
+                # [SAFETY] ID 유효성 검사 및 복구 (Stale Data 방지)
+                q_id = curr_q.get('id')
+                q_level = curr_q.get('level')
+                
+                if q_id is None:
+                    # DB에서 다시 조회
+                    try:
+                        conn = utils.db.get_db_connection()
+                        recovered = conn.execute("SELECT id, level FROM voca_db WHERE target_word = ?", (curr_q['target_word'],)).fetchone()
+                        conn.close()
+                        if recovered:
+                            q_id = recovered['id']
+                            q_level = recovered['level']
+                            # 세션 상태 업데이트 (선택 사항)
+                            curr_q['id'] = q_id
+                            curr_q['level'] = q_level
+                    except Exception as e:
+                        print(f"Recovery Error: {e}")
+
+                if q_id is not None:
+                    # 로그 포맷: [timestamp, date, word_id, username, level, is_correct]
+                    row = [timestamp, str(today), int(q_id), username, int(q_level) if q_level else 1, 1]
+                    utils.batch_log_study_results([row]) # 버퍼링 없이 즉시 저장
 
             # [속도 개선] 메모리 상의 progress_df 사용
             if 'user_progress_df' not in st.session_state:
                 st.session_state.user_progress_df = utils.load_user_progress(username)
             
             if st.session_state.is_first_attempt and st.session_state.get("quiz_mode") == "normal":
-                st.session_state.user_progress_df = utils.update_schedule(curr_q['id'], True, st.session_state.user_progress_df, today)
-                # [CHANGE] 진도표 즉시 저장 (단일 행 최적화)
-                try:
-                    target_row = st.session_state.user_progress_df[st.session_state.user_progress_df['word_id'] == curr_q['id']].iloc[0]
-                    utils.save_progress_single(username, curr_q['id'], target_row)
-                except Exception as e:
-                    print(f"Save Error: {e}")
+                # ID가 유효할 때만 실행
+                q_id = curr_q.get('id') 
+                if q_id is not None:
+                    st.session_state.user_progress_df = utils.update_schedule(q_id, True, st.session_state.user_progress_df, today)
+                    # [CHANGE] 진도표 즉시 저장 (단일 행 최적화)
+                    try:
+                        target_row = st.session_state.user_progress_df[st.session_state.user_progress_df['word_id'] == q_id].iloc[0]
+                        utils.save_progress_single(username, q_id, target_row)
+                    except Exception as e:
+                        print(f"Save Error: {e}")
             
             st.session_state.quiz_state = "success"
             st.session_state.last_result = "correct"
@@ -271,41 +295,60 @@ def give_up_callback(username, curr_q, today):
     
     # [NEW] 이미 check_answer에서 실패 처리된 경우 중복 로깅 방지
     if st.session_state.is_first_attempt:
-        # 1. 학습 로그 (오답=0) - [FIX] (D) 정규 모드일 때만 기록
-        if st.session_state.get("quiz_mode") == "normal":
-            # [CHANGE] 즉시 DB 저장
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            row = [timestamp, str(today), int(curr_q['id']), username, int(curr_q['level']), 0]
-            utils.batch_log_study_results([row])
         
-        # 2. 오답 노트 추가
-        if 'pending_wrongs_local' not in st.session_state: st.session_state.pending_wrongs_local = set()
-        st.session_state.pending_wrongs_local.add(curr_q['id'])
-        # [FIX] 즉시 DB 동기화
-        new_wrongs_str = ",".join(str(x) for x in st.session_state.pending_wrongs_local)
-        utils.update_user_dynamic_fields(username, {'pending_wrongs': new_wrongs_str})
+        # [SAFETY] ID 유효성 검사 및 복구
+        q_id = curr_q.get('id')
+        q_level = curr_q.get('level')
         
-        # 3. 세션 목록에서 제거 (완료됨)
-        if 'pending_session_local' not in st.session_state: st.session_state.pending_session_local = set()
-        if st.session_state.get("quiz_mode") == "normal":
-            if curr_q['id'] in st.session_state.pending_session_local:
-                st.session_state.pending_session_local.remove(curr_q['id'])
-                # [FIX] 즉시 DB 동기화
-                new_session_str = ",".join(str(x) for x in st.session_state.pending_session_local)
-                utils.update_user_dynamic_fields(username, {'pending_session': new_session_str})
-
-        # 4. 진도표 업데이트 (Fail)
-        if 'user_progress_df' not in st.session_state:
-            st.session_state.user_progress_df = utils.load_user_progress(username)
-            
-        if st.session_state.get("quiz_mode") == "normal":
-            st.session_state.user_progress_df = utils.update_schedule(curr_q['id'], False, st.session_state.user_progress_df, today)
-            # [CHANGE] 진도표 즉시 저장 (단일 행 최적화)
+        if q_id is None:
             try:
-                target_row = st.session_state.user_progress_df[st.session_state.user_progress_df['word_id'] == curr_q['id']].iloc[0]
-                utils.save_progress_single(username, curr_q['id'], target_row)
+                conn = utils.db.get_db_connection()
+                recovered = conn.execute("SELECT id, level FROM voca_db WHERE target_word = ?", (curr_q['target_word'],)).fetchone()
+                conn.close()
+                if recovered:
+                    q_id = recovered['id']
+                    q_level = recovered['level']
+                    curr_q['id'] = q_id
+                    curr_q['level'] = q_level
             except Exception as e:
-                print(f"Save Error: {e}")
+                print(f"Recovery Error: {e}")
+
+        if q_id is not None:
+            # 1. 학습 로그 (오답=0) - [FIX] (D) 정규 모드일 때만 기록
+            if st.session_state.get("quiz_mode") == "normal":
+                # [CHANGE] 즉시 DB 저장
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                row = [timestamp, str(today), int(q_id), username, int(q_level) if q_level else 1, 0]
+                utils.batch_log_study_results([row])
+            
+            # 2. 오답 노트 추가
+            if 'pending_wrongs_local' not in st.session_state: st.session_state.pending_wrongs_local = set()
+            st.session_state.pending_wrongs_local.add(q_id)
+            # [FIX] 즉시 DB 동기화
+            new_wrongs_str = ",".join(str(x) for x in st.session_state.pending_wrongs_local)
+            utils.update_user_dynamic_fields(username, {'pending_wrongs': new_wrongs_str})
+            
+            # 3. 세션 목록에서 제거 (완료됨)
+            if 'pending_session_local' not in st.session_state: st.session_state.pending_session_local = set()
+            if st.session_state.get("quiz_mode") == "normal":
+                if q_id in st.session_state.pending_session_local:
+                    st.session_state.pending_session_local.remove(q_id)
+                    # [FIX] 즉시 DB 동기화
+                    new_session_str = ",".join(str(x) for x in st.session_state.pending_session_local)
+                    utils.update_user_dynamic_fields(username, {'pending_session': new_session_str})
+
+            # 4. 진도표 업데이트 (Fail)
+            if 'user_progress_df' not in st.session_state:
+                st.session_state.user_progress_df = utils.load_user_progress(username)
+                
+            if st.session_state.get("quiz_mode") == "normal":
+                st.session_state.user_progress_df = utils.update_schedule(q_id, False, st.session_state.user_progress_df, today)
+                # [CHANGE] 진도표 즉시 저장 (단일 행 최적화)
+                try:
+                    target_row = st.session_state.user_progress_df[st.session_state.user_progress_df['word_id'] == q_id].iloc[0]
+                    utils.save_progress_single(username, q_id, target_row)
+                except Exception as e:
+                    print(f"Save Error: {e}")
         
     # 5. 오답 리스트 추가 (재학습용) - 중복 방지
     if 'wrong_answers' not in st.session_state: st.session_state.wrong_answers = []
@@ -865,10 +908,17 @@ def show_admin_page():
             with c_up:
                 st.markdown("#### 2️⃣ 엑셀 파일 업로드")
                 uploaded_file = st.file_uploader("수정한 엑셀 파일을 이곳에 드래그하세요", type=['xlsx'])
+                
+                # [NEW] 초기화 옵션
+                reset_mode = st.checkbox("⚠️ 기존 단어 싹 지우고 새로 올리기 (주의!)", help="체크하면 기존 단어와 학생들의 단어별 진도율이 초기화됩니다. (학생 계정은 유지됨)")
+                
                 if uploaded_file is not None:
-                    if st.button("📤 DB에 반영하기", type="primary", use_container_width=True):
+                    btn_label = "📤 DB에 반영하기" if not reset_mode else "🧨 초기화 후 새로 올리기"
+                    btn_type = "primary" if not reset_mode else "secondary"
+                    
+                    if st.button(btn_label, type=btn_type, use_container_width=True):
                         with st.spinner("데이터 처리 중..."):
-                            success, msg = utils.process_excel_upload(uploaded_file)
+                            success, msg = utils.process_excel_upload(uploaded_file, reset_mode=reset_mode)
                             if success:
                                 st.cache_data.clear()
                                 drive_sync.upload_db_to_drive()

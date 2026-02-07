@@ -88,7 +88,7 @@ def migrate(force_overwrite=False):
         voca_df = read_sheet_to_df(client, 'voca_db')
         if not voca_df.empty:
             # 데이터 클리닝
-            cols = ['id', 'target_word', 'meaning', 'level', 'sentence_en', 'sentence_ko', 'root_word', 'total_try', 'total_wrong']
+            cols = ['id', 'target_word', 'meaning', 'pos', 'level', 'sentence_en', 'sentence_ko', 'root_word', 'total_try', 'total_wrong']
             # 존재하는 컬럼만 선택
             voca_df = voca_df[[c for c in cols if c in voca_df.columns]]
             
