@@ -592,8 +592,17 @@ def handle_session_end(username, progress_df, today):
                         st.markdown(f"<h3 style='text-align: center;'>{msg}</h3>", unsafe_allow_html=True)
                         st.write(f"Level {current_level} ➡ Level {new_level}")
                         if st.button("확인", key="btn_lv_change", use_container_width=True):
-                            st.session_state.page = 'dashboard'
-                            st.rerun()
+                            if st.session_state.wrong_answers:
+                                st.session_state.quiz_list = st.session_state.wrong_answers
+                                st.session_state.wrong_answers = []
+                                st.session_state.current_idx = 0
+                                st.session_state.retry_mode = False
+                                st.session_state.quiz_state = "answering"
+                                st.session_state.quiz_mode = "wrong_review"
+                                st.rerun()
+                            else:
+                                st.session_state.page = 'dashboard'
+                                st.rerun()
                     return # 여기서 중단하고 사용자 반응 대기
                 else:
                     # [CHANGE] 레벨 유지 시에도 명확한 결과 창 표시 (자동 넘어감 방지)
@@ -604,8 +613,17 @@ def handle_session_end(username, progress_df, today):
                         st.caption(f"다음 평가까지: {20 - remainder_qs}문제")
                         
                         if st.button("확인", key="btn_lv_keep", use_container_width=True):
-                            st.session_state.page = 'dashboard'
-                            st.rerun()
+                            if st.session_state.wrong_answers:
+                                st.session_state.quiz_list = st.session_state.wrong_answers
+                                st.session_state.wrong_answers = []
+                                st.session_state.current_idx = 0
+                                st.session_state.retry_mode = False
+                                st.session_state.quiz_state = "answering"
+                                st.session_state.quiz_mode = "wrong_review"
+                                st.rerun()
+                            else:
+                                st.session_state.page = 'dashboard'
+                                st.rerun()
                     return
             else:
                 # 로그가 부족한 경우 (혹시 모를 예외)
