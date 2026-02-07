@@ -1743,7 +1743,7 @@ def show_quiz_page():
                 top: 0;
                 background-color: white;
                 z-index: 100;
-                padding: 15px 0 20px 0;
+                padding: 10px 0 10px 0;
                 border-bottom: 1px solid #f0f0f0;
             }
             
@@ -1753,7 +1753,7 @@ def show_quiz_page():
                 background-color: #f1f3f5;
                 height: 6px;
                 border-radius: 3px;
-                margin-bottom: 20px;
+                margin-bottom: 15px;
                 overflow: hidden;
             }
             .progress-fill {
@@ -1767,7 +1767,7 @@ def show_quiz_page():
             .sentence-card {
                 background-color: #f8f9fa;
                 border-radius: 16px;
-                padding: 25px 20px;
+                padding: 15px 15px;
                 text-align: center;
                 margin-bottom: 10px;
                 box-shadow: 0 2px 8px rgba(0,0,0,0.03);
@@ -1780,23 +1780,23 @@ def show_quiz_page():
             }
             
             .meaning-text {
-                font-size: 1.1rem;
+                font-size: 1.0rem;
                 color: #868e96;
                 font-weight: 600;
-                margin-bottom: 15px;
+                margin-bottom: 5px;
             }
             
             .english-text {
-                font-size: 1.5rem;
+                font-size: 1.25rem;
                 font-weight: 700;
                 color: #343a40;
-                line-height: 1.5;
+                line-height: 1.4;
             }
             
             .korean-sub {
-                font-size: 0.95rem;
+                font-size: 0.9rem;
                 color: #333333;
-                margin-top: 15px;
+                margin-top: 5px;
                 font-weight: 400;
             }
             
@@ -1888,7 +1888,7 @@ def show_quiz_page():
                     <span>Lv.{curr_q['level']}</span>
                     <span>{idx + 1}/{len(st.session_state.quiz_list)}</span>
                 </div>
-                <div class="progress-track" style="margin-bottom: 12px;">
+                <div class="progress-track" style="margin-bottom: 8px;">
                     <div class="progress-fill" style="width: {progress_pct}%;"></div>
                 </div>
                 <div class="meaning-text">{curr_q['meaning']}</div>
@@ -1930,7 +1930,7 @@ def show_quiz_page():
                     <span>Lv.{curr_q['level']}</span>
                     <span>{idx + 1}/{len(st.session_state.quiz_list)}</span>
                 </div>
-                <div class="progress-track" style="margin-bottom: 12px;">
+                <div class="progress-track" style="margin-bottom: 8px;">
                     <div class="progress-fill" style="width: {progress_pct}%;"></div>
                 </div>
                 <div class="meaning-text">{curr_q['meaning']}</div>
