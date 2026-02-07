@@ -1738,7 +1738,7 @@ def show_quiz_page():
         <style>
             /* Hide Streamlit Header */
             header { visibility: hidden; }
-            .block-container { padding-top: 5rem !important; max-width: 700px; margin: 0 auto; }
+            .block-container { padding-top: 5rem !important; max-width: 700px; margin: 0 auto; padding-bottom: 10rem !important; }
             
             /* Sticky Game Area */
             .quiz-container {
@@ -1750,6 +1750,16 @@ def show_quiz_page():
                 padding: 10px 0 10px 0;
                 border-bottom: 1px solid #f0f0f0;
             }
+            
+            /* [FIX] Hide empty iframe container (Focus Script) to prevent extra space */
+            iframe[height="0"] { display: none !important; }
+            div[data-testid="stHtml"] { height: 0; margin: 0; }
+            
+            /* [FIX] Tighten Layout */
+            div[data-testid="stTextInput"] { margin-bottom: -10px !important; }
+            div[data-testid="stButton"] { margin-top: 10px !important; }
+            
+            /* Progress Bar */
             
             /* Progress Bar */
             .progress-track {
