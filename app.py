@@ -1287,6 +1287,10 @@ def show_level_test_page():
                 st.write("---")
                 if st.button("✅ 이 레벨로 시작하기", type="primary", use_container_width=True):
                     utils.update_user_level(st.session_state.username, final_lv)
+                    
+                    # [FIX] 레벨 설정 즉시 클라우드 백업 (재로그인 시 초기화 방지)
+                    drive_sync.upload_db_to_drive()
+                    
                     st.success(f"레벨 {final_lv}로 설정되었습니다!")
                     time.sleep(1)
                     st.session_state.is_level_testing = False
