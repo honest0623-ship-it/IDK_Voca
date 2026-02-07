@@ -1738,15 +1738,15 @@ def show_quiz_page():
         <style>
             /* Hide Streamlit Header */
             header { visibility: hidden; }
-            .block-container { padding-top: 3.5rem; max-width: 700px; margin: 0 auto; }
+            .block-container { padding-top: 5rem !important; max-width: 700px; margin: 0 auto; }
             
             /* Sticky Game Area */
             .quiz-container {
                 position: -webkit-sticky; /* Safari */
                 position: sticky;
-                top: 15px;
+                top: 45px !important;
                 background-color: white;
-                z-index: 100;
+                z-index: 9999;
                 padding: 10px 0 10px 0;
                 border-bottom: 1px solid #f0f0f0;
             }
