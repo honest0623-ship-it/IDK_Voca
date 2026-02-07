@@ -558,22 +558,22 @@ def handle_session_end(username, progress_df, today):
     
     total_qs_accumulated = current_qs_count + session_qs_count
     
-    if total_qs_accumulated >= 20:
+    if total_qs_accumulated >= 50:
         # 평가 진행
-        # 최근 20개 로그 가져오기 (현재 레벨)
+        # 최근 50개 로그 가져오기 (현재 레벨)
         if not study_log_df.empty:
             current_level_logs = study_log_df[study_log_df['level'] == current_level]
-            if len(current_level_logs) >= 20:
-                target_logs = current_level_logs.tail(20)
+            if len(current_level_logs) >= 50:
+                target_logs = current_level_logs.tail(50)
                 correct_count = target_logs['is_correct'].sum()
-                total_q = 20 # 고정
+                total_q = 50 # 고정
                 
                 new_level, new_streak, new_shield, msg = utils.evaluate_level_update(
                     current_level, correct_count, total_q, fail_streak, level_shield
                 )
                 
                 # 나머지 카운트 (25개 풀었으면 5개 남김)
-                remainder_qs = total_qs_accumulated % 20
+                remainder_qs = total_qs_accumulated % 50
                 
                 # DB 업데이트
                 updates = {
@@ -610,7 +610,7 @@ def handle_session_end(username, progress_df, today):
                         st.markdown(f"<h3 style='text-align: center;'>📊 레벨 평가 결과</h3>", unsafe_allow_html=True)
                         st.info(msg)
                         st.write(f"**Level {current_level} 유지**")
-                        st.caption(f"다음 평가까지: {20 - remainder_qs}문제")
+                        st.caption(f"다음 평가까지: {50 - remainder_qs}문제")
                         
                         if st.button("확인", key="btn_lv_keep", use_container_width=True):
                             if st.session_state.wrong_answers:
@@ -634,7 +634,7 @@ def handle_session_end(username, progress_df, today):
     else:
         # 평가 기준 미달 -> 카운트만 누적
         utils.update_user_dynamic_fields(username, {'qs_count': total_qs_accumulated})
-        st.success(f"📈 레벨 평가 진행 중: {total_qs_accumulated} / 20 문제")
+        st.success(f"📈 레벨 평가 진행 중: {total_qs_accumulated} / 50 문제")
 
     # [NEW] 데이터 자동 백업 (비동기 처리처럼 보이게 맨 마지막에)
     if drive_sync.upload_db_to_drive():
