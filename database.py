@@ -95,7 +95,6 @@ def init_db():
 
     conn.commit()
     conn.close()
-    st.info(f"데이터베이스 '{DB_FILE}'가 생성되었습니다.")
 
 # --- 데이터 읽기 함수 ---
 
@@ -145,7 +144,13 @@ def load_all_vocab():
 def get_user_info(username):
     """사용자 정보 가져오기 (기존 get_user_info 대체)"""
     conn = get_db_connection()
+    # 1. Exact Match
     user = conn.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
+    
+    # 2. Case-insensitive Fallback (if not found)
+    if not user:
+        user = conn.execute('SELECT * FROM users WHERE lower(username) = lower(?)', (username,)).fetchone()
+        
     conn.close()
     if user:
         return dict(user)
@@ -191,9 +196,14 @@ def register_user(username, password, name):
     """사용자 등록 (기존 register_user 대체)"""
     conn = get_db_connection()
     try:
+        # Check if user exists (Case-insensitive)
+        exists = conn.execute('SELECT 1 FROM users WHERE lower(username) = lower(?)', (username,)).fetchone()
+        if exists:
+            return "EXIST"
+
         conn.execute(
-            'INSERT INTO users (username, password, name, level, fail_streak, level_shield, qs_count, pending_wrongs, pending_session) VALUES (?, ?, ?, ?, 0, 3, 0, "", "")',
-            (username, password, name, 1) # 기본 레벨 1
+            'INSERT INTO users (username, password, name, level, fail_streak, level_shield, qs_count, pending_wrongs, pending_session) VALUES (?, ?, ?, NULL, 0, 3, 0, "", "")',
+            (username, password, name) # 기본 레벨 NULL (레벨 테스트 유도)
         )
         conn.commit()
         return "SUCCESS"
@@ -312,26 +322,56 @@ def reset_user_password(username, new_password_hash):
         conn.close()
 
 def save_user_progress(username, progress_df):
-    """사용자 진도 저장 (기존 save_progress 대체) - 훨씬 효율적!"""
+    """사용자 진도 저장 (기존 save_progress 대체) - 훨씬 효율적! (executemany 사용)"""
     conn = get_db_connection()
     c = conn.cursor()
     try:
         # 1. 해당 유저의 기존 progress 모두 삭제
         c.execute("DELETE FROM user_progress WHERE username = ?", (username,))
         
-        # 2. progress_df에 있는 내용 새로 삽입
+        # 2. 데이터 삽입 (executemany 사용)
         if not progress_df.empty:
-            # 날짜 객체를 문자열로 변환
-            df_to_save = progress_df.copy()
-            df_to_save['last_reviewed'] = df_to_save['last_reviewed'].astype(str)
-            df_to_save['next_review'] = df_to_save['next_review'].astype(str)
-            df_to_save['username'] = username # 혹시 모르니 username 다시 한번 확인
+            data_to_insert = []
+            for _, row in progress_df.iterrows():
+                # Word ID
+                try:
+                    w_id = int(row.get('word_id', 0))
+                except:
+                    w_id = 0
+                
+                # Skip invalid word_id
+                if w_id == 0: continue
 
-            # id 컬럼이 있다면 제거 (자동 증가이므로)
-            if 'id' in df_to_save.columns:
-                df_to_save = df_to_save.drop(columns=['id'])
+                # Dates (Handle NaT/None)
+                lr = row.get('last_reviewed')
+                nr = row.get('next_review')
+                
+                if pd.isna(lr) or str(lr).strip().lower() in ['nat', 'none', 'nan', '']:
+                    lr = None
+                else:
+                    lr = str(lr)
+                    
+                if pd.isna(nr) or str(nr).strip().lower() in ['nat', 'none', 'nan', '']:
+                    nr = None
+                else:
+                    nr = str(nr)
 
-            df_to_save.to_sql('user_progress', conn, if_exists='append', index=False)
+                # Stats
+                try:
+                    iv = int(row.get('interval', 0))
+                except: iv = 0
+                
+                try:
+                    fc = int(row.get('fail_count', 0))
+                except: fc = 0
+
+                data_to_insert.append((username, w_id, lr, nr, iv, fc))
+
+            if data_to_insert:
+                c.executemany('''
+                    INSERT INTO user_progress (username, word_id, last_reviewed, next_review, interval, fail_count)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', data_to_insert)
         
         conn.commit()
         return True
@@ -347,6 +387,9 @@ def update_single_user_progress(username, word_id, last_reviewed, next_review, i
     conn = get_db_connection()
     c = conn.cursor()
     try:
+        # [FIX] word_id 강제 형변환
+        word_id = int(word_id)
+        
         # 날짜 타입 변환 (Safety)
         if hasattr(last_reviewed, 'strftime'): last_reviewed = str(last_reviewed)
         if hasattr(next_review, 'strftime'): next_review = str(next_review)

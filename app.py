@@ -202,6 +202,9 @@ def main():
 
 # --- 콜백 (화면 상태 변경) ---
 def check_answer_callback(username, curr_q, target, today):
+    if curr_q is None:
+        return
+
     input_key = f"quiz_in_{st.session_state.current_idx}_{st.session_state.retry_mode}_{st.session_state.get('gave_up_mode', False)}"
     user_input = st.session_state.get(input_key, "").strip()
 
@@ -221,16 +224,19 @@ def check_answer_callback(username, curr_q, target, today):
             
             # 1. 오답 노트(Pending Wrongs) 제거
             if 'pending_wrongs_local' not in st.session_state: st.session_state.pending_wrongs_local = set()
-            if curr_q['id'] in st.session_state.pending_wrongs_local:
-                st.session_state.pending_wrongs_local.remove(curr_q['id'])
+            
+            # [SAFETY] ID 체크
+            q_id = curr_q.get('id')
+            if q_id and q_id in st.session_state.pending_wrongs_local:
+                st.session_state.pending_wrongs_local.remove(q_id)
                 # 즉시 DB 동기화
                 new_wrongs_str = ",".join(str(x) for x in st.session_state.pending_wrongs_local)
                 utils.update_user_dynamic_fields(username, {'pending_wrongs': new_wrongs_str})
             
             # 2. 진행 중인 세션(Pending Session) 제거
             if 'pending_session_local' not in st.session_state: st.session_state.pending_session_local = set()
-            if curr_q['id'] in st.session_state.pending_session_local:
-                st.session_state.pending_session_local.remove(curr_q['id'])
+            if q_id and q_id in st.session_state.pending_session_local:
+                st.session_state.pending_session_local.remove(q_id)
                 # 즉시 DB 동기화
                 new_session_str = ",".join(str(x) for x in st.session_state.pending_session_local)
                 utils.update_user_dynamic_fields(username, {'pending_session': new_session_str})
@@ -241,7 +247,6 @@ def check_answer_callback(username, curr_q, target, today):
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 
                 # [SAFETY] ID 유효성 검사 및 복구 (Stale Data 방지)
-                q_id = curr_q.get('id')
                 q_level = curr_q.get('level')
                 
                 if q_id is None:
@@ -270,7 +275,6 @@ def check_answer_callback(username, curr_q, target, today):
             
             if st.session_state.is_first_attempt and st.session_state.get("quiz_mode") == "normal":
                 # ID가 유효할 때만 실행
-                q_id = curr_q.get('id') 
                 if q_id is not None:
                     st.session_state.user_progress_df = utils.update_schedule(q_id, True, st.session_state.user_progress_df, today)
                     # [CHANGE] 진도표 즉시 저장 (단일 행 최적화)
@@ -292,6 +296,8 @@ def check_answer_callback(username, curr_q, target, today):
 
 def give_up_callback(username, curr_q, today):
     """모름/포기 버튼 클릭 시 처리"""
+    if curr_q is None:
+        return
     
     # [NEW] 이미 check_answer에서 실패 처리된 경우 중복 로깅 방지
     if st.session_state.is_first_attempt:
@@ -352,7 +358,11 @@ def give_up_callback(username, curr_q, today):
         
     # 5. 오답 리스트 추가 (재학습용) - 중복 방지
     if 'wrong_answers' not in st.session_state: st.session_state.wrong_answers = []
-    already_in = any(w['id'] == curr_q['id'] for w in st.session_state.wrong_answers)
+    already_in = False
+    q_id = curr_q.get('id')
+    if q_id:
+        already_in = any(w.get('id') == q_id for w in st.session_state.wrong_answers)
+    
     if not already_in:
         st.session_state.wrong_answers.append(curr_q)
 
@@ -660,8 +670,8 @@ def show_login_page():
                     # 비밀번호 검증
                     if utils.check_hashes(password, user_info['password']):
                         st.session_state.logged_in = True
-                        # [FIX] (A) 아이디 대소문자 문제 해결: 세션 저장 시 소문자로 통일
-                        st.session_state.username = username.strip().lower()
+                        # [FIX] DB에 저장된 정확한 대소문자 ID 사용 (업데이트 호환성)
+                        st.session_state.username = user_info['username']
                         st.session_state.page = 'dashboard'
                         st.session_state.login_error = None
                     else:
@@ -1103,6 +1113,8 @@ def show_level_test_page():
     if st.session_state.final_level_result is not None:
         final_lv = st.session_state.final_level_result
         if final_lv < 1: final_lv = 1
+        # [FIX] 초기 레벨 상한선을 15로 제한
+        if final_lv > 15: final_lv = 15
         
         _, col, _ = st.columns([1, 2, 1])
         with col:
@@ -1333,7 +1345,14 @@ def show_quiz_page():
             return
 
         user_info = utils.get_user_info(username)
-        user_level = int(user_info['level']) if user_info and pd.notna(user_info['level']) else 1
+        if not user_info:
+            st.error("사용자 정보를 불러올 수 없습니다. 다시 로그인해주세요.")
+            if st.button("로그인 화면으로 이동"):
+                st.session_state.page = 'login'
+                st.rerun()
+            return
+
+        user_level = int(user_info['level']) if pd.notna(user_info['level']) else 1
         
         # [속도 개선] 세션에 저장된 데이터 사용
         if 'user_progress_df' not in st.session_state:

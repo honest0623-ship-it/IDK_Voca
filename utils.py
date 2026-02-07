@@ -167,8 +167,10 @@ def save_progress_single(username, word_id, row_data):
     try:
         lr = row_data.get('last_reviewed')
         nr = row_data.get('next_review')
-        iv = row_data.get('interval', 0)
-        fc = row_data.get('fail_count', 0)
+        # [FIX] numpy int 타입을 native int로 변환 (SQLite BLOB 저장 방지)
+        word_id = int(word_id) # Ensure word_id is native int
+        iv = int(row_data.get('interval', 0))
+        fc = int(row_data.get('fail_count', 0))
         return db.update_single_user_progress(username, word_id, lr, nr, iv, fc)
     except Exception as e:
         print(f"Wrapper Error: {e}")
